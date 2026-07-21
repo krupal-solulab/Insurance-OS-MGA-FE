@@ -71,7 +71,7 @@ export function AppShell() {
   const crumbs = buildCrumbs(loc.pathname);
 
   return (
-    <div className="min-h-screen bg-[oklch(0.985_0.005_85)] text-foreground">
+    <div className="min-h-screen bg-background text-foreground">
       <div className="flex min-h-screen">
         <Sidebar pathname={loc.pathname} />
         <div className="flex min-h-screen flex-1 flex-col">

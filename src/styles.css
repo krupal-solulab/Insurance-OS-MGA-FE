@@ -44,12 +44,13 @@
 
 :root {
   --radius: 0.375rem;
+  color-scheme: light;
 
-  /* Paper / ink editorial palette */
-  --paper: oklch(0.975 0.008 85);           /* warm off-white */
-  --ink: oklch(0.19 0.02 250);              /* deep ink navy-black */
-  --ink-soft: oklch(0.36 0.02 250);
-  --rule: oklch(0.86 0.01 85);              /* hairline rule */
+  /* Paper / ink editorial palette — warm paper, cool ink, burnt-sienna accent */
+  --paper: oklch(0.979 0.006 83);           /* warm off-white */
+  --ink: oklch(0.185 0.022 264);            /* deep ink navy-black */
+  --ink-soft: oklch(0.40 0.02 264);
+  --rule: oklch(0.885 0.008 83);            /* hairline rule */
 
   --background: var(--paper);
   --foreground: var(--ink);
@@ -61,21 +62,21 @@
 
   --primary: var(--ink);
   --primary-foreground: var(--paper);
-  --secondary: oklch(0.94 0.008 85);
+  --secondary: oklch(0.945 0.008 83);
   --secondary-foreground: var(--ink);
 
-  --muted: oklch(0.94 0.008 85);
-  --muted-foreground: oklch(0.48 0.015 250);
+  --muted: oklch(0.945 0.008 83);
+  --muted-foreground: oklch(0.505 0.016 264);
 
   /* Accent: burnt sienna / rust — considered, editorial */
-  --accent: oklch(0.52 0.13 45);
-  --accent-foreground: oklch(0.98 0.005 85);
+  --accent: oklch(0.55 0.142 45);
+  --accent-foreground: oklch(0.985 0.005 83);
 
   --destructive: oklch(0.55 0.2 27);
-  --destructive-foreground: oklch(0.98 0.005 85);
+  --destructive-foreground: oklch(0.985 0.005 83);
 
-  --success: oklch(0.52 0.12 160);
-  --warn: oklch(0.65 0.15 75);
+  --success: oklch(0.52 0.11 162);
+  --warn: oklch(0.66 0.14 72);
 
   --border: var(--rule);
   --input: var(--rule);
@@ -83,27 +84,34 @@
 }
 
 .dark {
-  --paper: oklch(0.16 0.015 250);
-  --ink: oklch(0.96 0.005 85);
-  --ink-soft: oklch(0.78 0.01 85);
-  --rule: oklch(0.28 0.02 250);
+  color-scheme: dark;
+
+  /* Deep navy-charcoal paper, warm-neutral ink, brighter sienna to hold on dark */
+  --paper: oklch(0.173 0.017 264);
+  --ink: oklch(0.955 0.006 83);
+  --ink-soft: oklch(0.745 0.012 83);
+  --rule: oklch(0.305 0.018 264);
   --background: var(--paper);
   --foreground: var(--ink);
-  --card: oklch(0.20 0.02 250);
+  --card: oklch(0.214 0.02 264);
   --card-foreground: var(--ink);
-  --popover: oklch(0.20 0.02 250);
+  --popover: oklch(0.214 0.02 264);
   --popover-foreground: var(--ink);
   --primary: var(--ink);
-  --primary-foreground: oklch(0.16 0.015 250);
-  --secondary: oklch(0.22 0.02 250);
+  --primary-foreground: oklch(0.173 0.017 264);
+  --secondary: oklch(0.243 0.021 264);
   --secondary-foreground: var(--ink);
-  --muted: oklch(0.22 0.02 250);
-  --muted-foreground: oklch(0.68 0.015 85);
-  --accent: oklch(0.62 0.14 45);
-  --accent-foreground: oklch(0.16 0.015 250);
+  --muted: oklch(0.243 0.021 264);
+  --muted-foreground: oklch(0.665 0.014 83);
+  --accent: oklch(0.705 0.14 48);
+  --accent-foreground: oklch(0.173 0.017 264);
+  --destructive: oklch(0.645 0.19 27);
+  --destructive-foreground: oklch(0.985 0.005 83);
+  --success: oklch(0.70 0.12 162);
+  --warn: oklch(0.76 0.13 75);
   --border: var(--rule);
   --input: var(--rule);
-  --ring: var(--ink);
+  --ring: oklch(0.75 0.02 264);
 }
 
 @layer base {
@@ -140,4 +148,49 @@
 }
 @utility rule-b {
   border-bottom: 1px solid var(--color-rule);
+}
+
+/* Fine engineering-grid backdrop — subtle, editorial, not a gradient mesh. */
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--color-rule) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--color-rule) 55%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+/* Paper grain — a faint tactile noise layer applied via ::before on a positioned parent. */
+@utility grain {
+  position: relative;
+}
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+.dark .grain::before {
+  mix-blend-mode: screen;
+  opacity: 0.35;
+}
+
+/* Draws an SVG stroke on scroll — paired with Framer Motion pathLength. */
+@utility ledger-shadow {
+  box-shadow:
+    0 1px 0 0 color-mix(in oklch, var(--color-rule) 70%, transparent),
+    0 12px 28px -18px color-mix(in oklch, var(--color-ink) 45%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
