@@ -880,6 +880,50 @@ export function getRenewalDetail(r: Renewal): RenewalDetail {
 }
 
 /* ============================================================
+   Bind Order & Issuance — model. No backend: subjectivities /
+   compliance are toggle-able items that gate readiness; PAS
+   write-back is simulated. Backend seam = replace the issue
+   action with a real PAS write-back call.
+   ============================================================ */
+
+export type BindCheck = { id: string; label: string; note: string; cleared: boolean; kind: "subjectivity" | "compliance" };
+export type PacketItem = { label: string; ready: boolean };
+export type BindOrder = {
+  submissionId: string;
+  insured: string;
+  premium: string;
+  effective: string;
+  checks: BindCheck[];
+  packet: PacketItem[];
+  activity: ActivityEntry[];
+};
+
+export function getBindOrder(): BindOrder {
+  return {
+    submissionId: "SUB-24019",
+    insured: "Palmetto Cold Storage LLC",
+    premium: "$187,400",
+    effective: "02/12/2026",
+    checks: [
+      { id: "sub-sprinkler", label: "Sprinkler certification", note: "Requested from broker Jan 07", cleared: true, kind: "subjectivity" },
+      { id: "sub-monitoring", label: "Refrigeration monitoring cert", note: "Required for spoilage sub-limit", cleared: true, kind: "subjectivity" },
+      { id: "sub-inspection", label: "Inspection — 3 new locations", note: "No material findings", cleared: true, kind: "subjectivity" },
+      { id: "sub-payment", label: "Down-payment received", note: "$56,220 via ACH Jan 11", cleared: false, kind: "subjectivity" },
+      { id: "comp-ofac", label: "OFAC clearance", note: "Named insured + principals", cleared: true, kind: "compliance" },
+      { id: "comp-sl", label: "Surplus-lines tax (FL)", note: "Calculated · filing prepared", cleared: false, kind: "compliance" },
+    ],
+    packet: [
+      { label: "Binder", ready: true },
+      { label: "Policy jacket", ready: true },
+      { label: "Endorsement schedule", ready: true },
+      { label: "Surplus-lines filing", ready: false },
+      { label: "PAS write-back", ready: false },
+    ],
+    activity: [{ at: "09:15", who: "AI · Decision Core", what: "Bind order prepared from approved submission", ctx: "SUB-24019", conf: "—" }],
+  };
+}
+
+/* ============================================================
    Broker Communication — PRD-aligned draft model.
    No new extraction: every draft is generated FROM a Submission
    Triage or Renewal Management decision record. Mock data only,

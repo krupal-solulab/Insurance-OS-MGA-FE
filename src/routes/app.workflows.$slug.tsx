@@ -2,11 +2,11 @@ import type React from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
   Endorsements,
-  BindOrder,
   AppetiteGovernance,
   Portfolio,
   Claims,
 } from "@/components/app/Workflows";
+import { BindOrder } from "@/components/app/BindOrder";
 import { SubmissionTriage } from "@/components/app/SubmissionTriage";
 import { RenewalManagement } from "@/components/app/RenewalManagement";
 import { BrokerCopilot } from "@/components/app/BrokerCopilot";
