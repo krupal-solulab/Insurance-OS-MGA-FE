@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useRef, useState } from "react";
 import {
   Menu,
   X,
@@ -8,13 +8,14 @@ import {
   ScrollText,
   Check,
   ChevronDown,
+  ChevronRight,
   Mail,
   Table2,
   Users,
   Database,
   Sparkles,
 } from "lucide-react";
-import { motion, AnimatePresence, useReducedMotion } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion, useScroll, useMotionValueEvent } from "motion/react";
 import {
   Accordion,
   AccordionContent,
@@ -418,8 +419,74 @@ const steps = [
   },
 ];
 
+function StepNode({ n, reached }: { n: string; reached: boolean }) {
+  return (
+    <span
+      data-reached={reached}
+      className="relative z-10 grid h-10 w-10 place-items-center rounded-full border border-border bg-background font-mono text-xs text-accent transition-colors duration-300 data-[reached=true]:border-accent data-[reached=true]:bg-accent data-[reached=true]:text-accent-foreground"
+    >
+      {n}
+    </span>
+  );
+}
+
+function StepCard({
+  step,
+  reached,
+  current,
+}: {
+  step: (typeof steps)[number];
+  reached: boolean;
+  current: boolean;
+}) {
+  const Icon = step.Icon;
+  return (
+    <div
+      className={`group relative flex h-full flex-col overflow-hidden border border-border bg-background p-6 transition-all duration-300 hover:-translate-y-1 hover:border-foreground/30 hover:shadow-[0_22px_46px_-26px_var(--color-ink)] ${
+        current ? "bg-accent/[0.05]" : ""
+      }`}
+    >
+      {/* accent bar fills in as the step is reached on scroll */}
+      <span
+        aria-hidden
+        data-reached={reached}
+        className="absolute inset-x-0 top-0 h-0.5 origin-left scale-x-0 bg-accent transition-transform duration-500 data-[reached=true]:scale-x-100"
+      />
+      <div className="flex items-center">
+        <span className="font-mono text-xs text-accent md:hidden">{step.n}</span>
+        <span className="label-eyebrow ml-auto">Step</span>
+      </div>
+      <span className="mt-5 grid h-11 w-11 place-items-center border border-accent/25 bg-accent/10 text-accent transition-colors duration-300 group-hover:bg-accent group-hover:text-accent-foreground">
+        <Icon className="h-5 w-5" />
+      </span>
+      <div className="mt-4 font-serif text-2xl tracking-[-0.01em] md:text-3xl">{step.key}</div>
+      <p className="mt-3 text-sm leading-relaxed text-ink-soft">{step.body}</p>
+    </div>
+  );
+}
+
+function SampleCard({ n, label, children }: { n: string; label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex h-full flex-col border border-border bg-card shadow-[0_14px_34px_-22px_var(--color-ink)]">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <div className="label-eyebrow !text-[10px]">Sample view · {label}</div>
+        <span className="border border-accent/30 px-1.5 py-0.5 font-mono text-[10px] text-accent">{n}</span>
+      </div>
+      <div className="min-h-[136px] flex-1 p-4">{children}</div>
+    </div>
+  );
+}
+
 function HowItWorks() {
   const reduce = useReducedMotion();
+  const stepsRef = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({ target: stepsRef, offset: ["start 75%", "end 45%"] });
+  const [active, setActive] = useState(0);
+  useMotionValueEvent(scrollYProgress, "change", (v) => {
+    const idx = Math.min(steps.length - 1, Math.max(0, Math.floor(v * steps.length)));
+    setActive(idx);
+  });
+
   return (
     <section id="how" className="rule-t">
       <div className="mx-auto max-w-7xl px-5 py-20 md:px-8 md:py-28">
@@ -430,97 +497,108 @@ function HowItWorks() {
           </Reveal>
         </div>
 
-        {/* Steps with a progress line that draws on scroll */}
-        <div className="relative mt-16">
-          <div className="absolute left-0 right-0 top-0 h-px bg-border" />
-          <motion.div
-            className="absolute left-0 top-0 h-px origin-left bg-accent"
-            initial={reduce ? false : { scaleX: 0 }}
-            whileInView={reduce ? undefined : { scaleX: 1 }}
-            viewport={{ once: true, margin: "-100px" }}
-            transition={{ duration: 1.1, ease: "easeInOut" }}
-            style={{ right: 0 }}
-          />
-          <RevealGroup className="grid gap-px rule-b bg-border md:grid-cols-4" stagger={0.12}>
-            {steps.map((s) => (
-              <RevealChild key={s.n} className="group bg-background p-6 md:p-8">
-                <div className="flex items-baseline justify-between">
-                  <span className="font-mono text-xs text-accent">{s.n}</span>
-                  <span className="label-eyebrow">Step</span>
+        <div ref={stepsRef} className="mt-14 md:mt-16">
+          {/* Pipeline rail with numbered nodes — reads as one connected process */}
+          <div aria-hidden className="relative mb-6 hidden h-10 md:block">
+            <div className="absolute left-[12.5%] right-[12.5%] top-1/2 h-px -translate-y-1/2 bg-border" />
+            <motion.div
+              className="absolute left-[12.5%] top-1/2 h-px -translate-y-1/2 origin-left bg-accent"
+              style={{ right: "12.5%", scaleX: reduce ? 1 : scrollYProgress }}
+            />
+            {[25, 50, 75].map((p) => (
+              <ChevronRight
+                key={p}
+                className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 text-muted-foreground/60"
+                style={{ left: `${p}%` }}
+              />
+            ))}
+            <div className="relative grid grid-cols-4">
+              {steps.map((s, i) => (
+                <div key={s.n} className="flex justify-center">
+                  <StepNode n={s.n} reached={i <= active} />
                 </div>
-                <s.Icon className="mt-6 h-8 w-8 text-foreground transition-transform duration-300 group-hover:-translate-y-0.5" />
-                <div className="mt-4 font-serif text-2xl tracking-[-0.01em] md:text-3xl">
-                  {s.key}
-                </div>
-                <p className="mt-3 text-sm leading-relaxed text-ink-soft">{s.body}</p>
+              ))}
+            </div>
+          </div>
+
+          {/* Step cards */}
+          <RevealGroup className="grid items-stretch gap-4 md:grid-cols-4" stagger={0.12}>
+            {steps.map((s, i) => (
+              <RevealChild key={s.n} className="h-full">
+                <StepCard step={s} reached={i <= active} current={i === active} />
               </RevealChild>
             ))}
           </RevealGroup>
         </div>
 
-        {/* Sample-view mock strip */}
+        {/* Sample-view strip — one consistent card system */}
         <div className="mt-12 flex items-center justify-between">
           <div className="label-eyebrow">Sample views</div>
           <Illustrative>Illustrative data</Illustrative>
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-4">
-          {/* 01 Read */}
-          <Reveal className="rule-t rule-b bg-secondary/50 p-5 ledger-shadow" y={18}>
-            <div className="label-eyebrow mb-3">Sample view · Read</div>
-            <RevealGroup className="space-y-1.5 font-mono text-[11px] leading-relaxed" stagger={0.07}>
-              <RevealChild className="bg-accent/15 px-1.5 py-0.5">
-                Named Insured: <span className="text-accent">Riverbend Logistics LLC</span>
-              </RevealChild>
-              <RevealChild>Effective: 03/01/2026</RevealChild>
-              <RevealChild className="bg-accent/15 px-1.5 py-0.5">
-                TIV: <span className="text-accent">$14.2M</span>
-              </RevealChild>
-              <RevealChild>SIC: 4213 · Trucking</RevealChild>
-              <RevealChild className="bg-accent/15 px-1.5 py-0.5">
-                5-yr losses: <span className="text-accent">$482k / 11 claims</span>
-              </RevealChild>
-            </RevealGroup>
-          </Reveal>
-          {/* 02 Check */}
-          <Reveal className="rule-t rule-b bg-secondary/50 p-5 ledger-shadow" y={18} delay={0.05}>
-            <div className="label-eyebrow mb-3">Sample view · Check</div>
-            <RevealGroup className="space-y-2 text-xs" stagger={0.08} as="ul">
-              <RevealChild as="li" className="flex items-center gap-2">
-                <Check className="h-3.5 w-3.5 text-success" /> Class in appetite
-              </RevealChild>
-              <RevealChild as="li" className="flex items-center gap-2">
-                <Check className="h-3.5 w-3.5 text-success" /> Radius ≤ 500 mi
-              </RevealChild>
-              <RevealChild as="li" className="flex items-center gap-2 text-warn">
-                <span className="inline-block h-2 w-2 bg-warn" /> Loss ratio flag: 42%
-              </RevealChild>
-              <RevealChild as="li" className="flex items-center gap-2">
-                <Check className="h-3.5 w-3.5 text-success" /> MVR complete
-              </RevealChild>
-            </RevealGroup>
-          </Reveal>
-          {/* 03 Draft */}
-          <Reveal className="rule-t rule-b bg-secondary/50 p-5 ledger-shadow" y={18} delay={0.1}>
-            <div className="label-eyebrow mb-3">Sample view · Draft</div>
-            <div className="font-serif text-lg leading-snug">Proceed with quote, subject to MVR review.</div>
-            <div className="mt-3 border-l-2 border-accent pl-2 text-[11px] text-ink-soft">
-              Cited: Loss Run p.2, ACORD 125 §4
-            </div>
-          </Reveal>
-          {/* 04 Approve */}
-          <Reveal className="rule-t rule-b bg-secondary/50 p-5 ledger-shadow" y={18} delay={0.15}>
-            <div className="label-eyebrow mb-3">Sample view · Approve</div>
-            <div className="flex flex-col gap-2">
-              <button className="rule-t rule-b bg-foreground py-2 text-xs font-medium text-background transition-colors hover:bg-accent hover:text-accent-foreground">
-                Approve &amp; send
-              </button>
-              <button className="rule-t rule-b py-2 text-xs font-medium transition-colors hover:bg-background">Edit draft</button>
-              <button className="py-2 text-xs text-ink-soft underline-offset-4 hover:underline">
-                Override with note
-              </button>
-            </div>
-          </Reveal>
-        </div>
+        <RevealGroup className="mt-4 grid items-stretch gap-4 md:grid-cols-4" stagger={0.12}>
+          <RevealChild className="h-full">
+            <SampleCard n="01" label="Read">
+              <div className="space-y-1.5 font-mono text-[11px] leading-relaxed">
+                <div className="bg-accent/15 px-1.5 py-0.5">
+                  Named Insured: <span className="text-accent">Riverbend Logistics LLC</span>
+                </div>
+                <div>Effective: 03/01/2026</div>
+                <div className="bg-accent/15 px-1.5 py-0.5">
+                  TIV: <span className="text-accent">$14.2M</span>
+                </div>
+                <div>SIC: 4213 · Trucking</div>
+                <div className="bg-accent/15 px-1.5 py-0.5">
+                  5-yr losses: <span className="text-accent">$482k / 11 claims</span>
+                </div>
+              </div>
+            </SampleCard>
+          </RevealChild>
+
+          <RevealChild className="h-full">
+            <SampleCard n="02" label="Check">
+              <ul className="space-y-2 text-xs">
+                <li className="flex items-center gap-2">
+                  <Check className="h-3.5 w-3.5 text-success" /> Class in appetite
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-3.5 w-3.5 text-success" /> Radius ≤ 500 mi
+                </li>
+                <li className="flex items-center gap-2 text-warn">
+                  <span className="inline-block h-2 w-2 bg-warn" /> Loss ratio flag: 42%
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-3.5 w-3.5 text-success" /> MVR complete
+                </li>
+              </ul>
+            </SampleCard>
+          </RevealChild>
+
+          <RevealChild className="h-full">
+            <SampleCard n="03" label="Draft">
+              <div className="font-serif text-lg leading-snug">Proceed with quote, subject to MVR review.</div>
+              <div className="mt-3 border-l-2 border-accent pl-2 text-[11px] text-ink-soft">
+                Cited: Loss Run p.2, ACORD 125 §4
+              </div>
+            </SampleCard>
+          </RevealChild>
+
+          <RevealChild className="h-full">
+            <SampleCard n="04" label="Approve">
+              <div className="flex flex-col gap-2">
+                <button className="border border-border bg-foreground py-2 text-xs font-medium text-background transition-colors hover:bg-accent hover:text-accent-foreground">
+                  Approve &amp; send
+                </button>
+                <button className="border border-border py-2 text-xs font-medium transition-colors hover:bg-secondary">
+                  Edit draft
+                </button>
+                <button className="py-2 text-xs text-ink-soft underline-offset-4 hover:underline">
+                  Override with note
+                </button>
+              </div>
+            </SampleCard>
+          </RevealChild>
+        </RevealGroup>
       </div>
     </section>
   );
@@ -653,12 +731,20 @@ function WorkflowCard({
 }) {
   const reduce = useReducedMotion();
   const dark = tone === "now";
-  const cardCls =
-    tone === "now"
-      ? "bg-foreground text-background ledger-shadow"
-      : tone === "next"
-        ? "border border-border bg-background"
-        : "border border-dashed border-border bg-transparent text-ink-soft";
+
+  // One card system, differentiated by surface + border, with a shared
+  // (progressively lighter) shadow so all three tiers feel related.
+  const surfaceCls: Record<Tone, string> = {
+    now: "bg-foreground text-background border border-foreground",
+    next: "bg-background border border-dashed border-border",
+    later: `bg-background/40 border border-border/60 ${open ? "opacity-100" : "opacity-80 group-hover:opacity-100"}`,
+  };
+  const shadowCls: Record<Tone, string> = {
+    now: "shadow-[0_22px_48px_-26px_var(--color-ink)] group-hover:shadow-[0_32px_62px_-22px_var(--color-ink)]",
+    next: "shadow-[0_14px_32px_-26px_var(--color-ink)] group-hover:shadow-[0_24px_48px_-24px_var(--color-ink)]",
+    later: "shadow-[0_10px_26px_-26px_var(--color-ink)] group-hover:shadow-[0_20px_42px_-26px_var(--color-ink)]",
+  };
+  const cardCls = `${surfaceCls[tone]} ${shadowCls[tone]}`;
 
   const affordance =
     tone === "now" ? "See how it works" : tone === "next" ? "See what's coming" : "Preview the plan";
@@ -672,7 +758,7 @@ function WorkflowCard({
     : "text-muted-foreground group-hover:text-accent";
 
   return (
-    <div className={`group h-full transition-shadow ${cardCls}`}>
+    <div className={`group h-full transition-all duration-300 hover:-translate-y-1 ${cardCls}`}>
       <button
         type="button"
         onClick={onToggle}
@@ -772,7 +858,7 @@ function Workflows() {
                   {tier.label}
                 </div>
                 <span className="font-mono text-[11px] text-ink-soft">
-                  {tier.items.length.toString().padStart(2, "0")}
+                  {tier.items.length} {tier.items.length === 1 ? "workflow" : "workflows"}
                 </span>
               </div>
               <RevealGroup className="grid items-start gap-4 md:grid-cols-3" stagger={0.08}>
