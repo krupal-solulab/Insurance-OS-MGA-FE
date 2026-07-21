@@ -24,6 +24,7 @@ import {
   X,
   Send,
   ArrowUpRight,
+  LogOut,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -238,6 +239,17 @@ function TopBar({ crumbs, onOpenCopilot }: { crumbs: { label: string; to?: strin
             <div className="text-[10px] text-muted-foreground">{me.title}</div>
           </div>
         </div>
+        <button
+          onClick={() => {
+            try { localStorage.removeItem("coverline-role"); } catch { /* ignore */ }
+            window.location.assign("/login");
+          }}
+          className="rounded-lg border border-border p-2 hover:bg-secondary"
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
       </div>
     </header>
   );
