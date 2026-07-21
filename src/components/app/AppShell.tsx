@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { RoleProvider, useRole, ROLE_IDENTITY } from "./role";
 
 const workflows = [
   { slug: "submission-triage", label: "Submission Triage", icon: Inbox, badge: "12" },
@@ -71,28 +72,30 @@ export function AppShell() {
   const crumbs = buildCrumbs(loc.pathname);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="flex min-h-screen">
-        <Sidebar pathname={loc.pathname} />
-        <div className="flex min-h-screen flex-1 flex-col">
-          <TopBar crumbs={crumbs} onOpenCopilot={() => setCopilotOpen(true)} />
-          <main className="flex-1 px-6 py-6 md:px-10 md:py-10">
-            <Outlet />
-          </main>
+    <RoleProvider>
+      <div className="min-h-screen bg-background text-foreground">
+        <div className="flex min-h-screen">
+          <Sidebar pathname={loc.pathname} />
+          <div className="flex min-h-screen flex-1 flex-col">
+            <TopBar crumbs={crumbs} onOpenCopilot={() => setCopilotOpen(true)} />
+            <main className="flex-1 px-6 py-6 md:px-10 md:py-10">
+              <Outlet />
+            </main>
+          </div>
         </div>
+        <CopilotDrawer open={copilotOpen} onClose={() => setCopilotOpen(false)} />
+        {!copilotOpen && (
+          <button
+            onClick={() => setCopilotOpen(true)}
+            className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-foreground px-4 py-3 text-sm font-medium text-background shadow-lg shadow-black/10 transition hover:opacity-90"
+          >
+            <Sparkles className="h-4 w-4" />
+            Ask Coverline AI
+            <kbd className="ml-1 rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+          </button>
+        )}
       </div>
-      <CopilotDrawer open={copilotOpen} onClose={() => setCopilotOpen(false)} />
-      {!copilotOpen && (
-        <button
-          onClick={() => setCopilotOpen(true)}
-          className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-foreground px-4 py-3 text-sm font-medium text-background shadow-lg shadow-black/10 transition hover:opacity-90"
-        >
-          <Sparkles className="h-4 w-4" />
-          Ask Coverline AI
-          <kbd className="ml-1 rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
-        </button>
-      )}
-    </div>
+    </RoleProvider>
   );
 }
 
@@ -195,6 +198,8 @@ function NavItem({
 }
 
 function TopBar({ crumbs, onOpenCopilot }: { crumbs: { label: string; to?: string }[]; onOpenCopilot: () => void }) {
+  const { role } = useRole();
+  const me = ROLE_IDENTITY[role];
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-border bg-background/85 px-6 backdrop-blur md:px-10">
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -227,10 +232,10 @@ function TopBar({ crumbs, onOpenCopilot }: { crumbs: { label: string; to?: strin
           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent" />
         </button>
         <div className="flex items-center gap-2 rounded-full border border-border bg-secondary/60 px-1 py-1 pr-3">
-          <div className="grid h-7 w-7 place-items-center rounded-full bg-foreground font-serif text-xs text-background">PR</div>
+          <div className="grid h-7 w-7 place-items-center rounded-full bg-foreground font-serif text-xs text-background">{me.initials}</div>
           <div className="text-xs leading-tight">
-            <div className="font-medium">Priya R.</div>
-            <div className="text-[10px] text-muted-foreground">Sr. Underwriter</div>
+            <div className="font-medium">{me.name}</div>
+            <div className="text-[10px] text-muted-foreground">{me.title}</div>
           </div>
         </div>
       </div>

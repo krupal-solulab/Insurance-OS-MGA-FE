@@ -31,6 +31,7 @@ import {
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
+import { useRole, JUNIOR_PREMIUM_CAP, parseMoney } from "./role";
 import {
   submissions,
   getTriageDetail,
@@ -138,7 +139,7 @@ function matchesFilter(s: Submission, f: FilterKey): boolean {
 
 /* ---------------------------- main ---------------------------- */
 
-type Decision = { action: "approved" | "overridden" | "info_requested" | null; label?: string };
+type Decision = { action: "approved" | "overridden" | "info_requested" | "escalated" | null; label?: string };
 
 export function SubmissionTriage() {
   const [selected, setSelected] = useState(submissions[0].id);
@@ -158,9 +159,14 @@ export function SubmissionTriage() {
   const [overrideReason, setOverrideReason] = useState<string>("");
   const [draftOpen, setDraftOpen] = useState(false);
 
+  const { role } = useRole();
+  const isJunior = role === "junior";
+
   const s = submissions.find((x) => x.id === selected)!;
   const d = details[selected];
   const decision = decisions[selected] ?? { action: null };
+  const overCap = parseMoney(s.premium) > JUNIOR_PREMIUM_CAP;
+  const canDecide = !isJunior || (!overCap && d.hardRulePassed && d.recommendation !== "DECLINE");
 
   const filtered = useMemo(
     () =>
@@ -210,6 +216,15 @@ export function SubmissionTriage() {
   function reprocess() {
     setDetails((prev) => ({ ...prev, [selected]: { ...prev[selected], processing: "ready" } }));
     logActivity({ who: "Priya R. (UW)", what: "Re-ran processing", ctx: "manual retry" });
+  }
+
+  function escalate() {
+    setDecisions((prev) => ({ ...prev, [selected]: { action: "escalated", label: "Escalated to senior" } }));
+    logActivity({
+      who: "Sofia A. (Jr UW)",
+      what: "Escalated to senior underwriter",
+      ctx: overCap ? "above authority limit" : !d.hardRulePassed ? "hard-rule appetite fail" : "decline decision",
+    });
   }
 
   function approve() {
@@ -359,19 +374,37 @@ export function SubmissionTriage() {
                 </div>
               </div>
               {decision.action ? (
-                <Chip tone={decision.action === "overridden" ? "warn" : "success"}>
+                <Chip tone={decision.action === "overridden" ? "warn" : decision.action === "escalated" ? "accent" : "success"}>
                   <CheckCircle2 className="h-3 w-3" /> {decision.label}
                 </Chip>
               ) : (
                 <div className="flex items-center gap-2">
                   <Button variant="secondary" onClick={requestInfo}>Request info</Button>
-                  <Button variant="danger" onClick={() => setOverride("DECLINE")}>Decline</Button>
-                  <Button variant="primary" onClick={approve}>
-                    Proceed to quote <ArrowRight className="h-4 w-4" />
-                  </Button>
+                  {!isJunior && <Button variant="danger" onClick={() => setOverride("DECLINE")}>Decline</Button>}
+                  {canDecide ? (
+                    <Button variant="primary" onClick={approve}>
+                      {isJunior ? "Approve" : "Proceed to quote"} <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button variant="primary" onClick={escalate}>
+                      Escalate to senior <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
+
+            {isJunior && !decision.action && (
+              <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <ShieldAlert className="h-3.5 w-3.5 text-accent" />
+                Your authority: approve up to ${JUNIOR_PREMIUM_CAP.toLocaleString()} premium.
+                {overCap
+                  ? " This submission is above your limit — route to a senior."
+                  : !d.hardRulePassed
+                    ? " Hard-rule declines are a senior decision."
+                    : ""}
+              </div>
+            )}
 
             {/* Hard-rule DECLINE short-circuit banner */}
             {!d.hardRulePassed && (
@@ -439,8 +472,11 @@ export function SubmissionTriage() {
                 <RecommendationTab
                   d={d}
                   decision={decision}
+                  isJunior={isJunior}
+                  canDecide={canDecide}
                   onApprove={approve}
                   onOverride={(r) => setOverride(r)}
+                  onEscalate={escalate}
                   onDraft={() => setDraftOpen(true)}
                 />
               )}
@@ -770,14 +806,20 @@ function AppetiteTab({ d }: { d: TriageDetail }) {
 function RecommendationTab({
   d,
   decision,
+  isJunior,
+  canDecide,
   onApprove,
   onOverride,
+  onEscalate,
   onDraft,
 }: {
   d: TriageDetail;
   decision: Decision;
+  isJunior: boolean;
+  canDecide: boolean;
   onApprove: () => void;
   onOverride: (r: TriageRecommendation) => void;
+  onEscalate: () => void;
   onDraft: () => void;
 }) {
   const tone = recTone(d.recommendation);
@@ -829,6 +871,17 @@ function RecommendationTab({
           <div className="mt-3 rounded-lg border border-success/30 bg-success/5 p-3 text-sm">
             <div className="flex items-center gap-2 font-medium text-success"><CheckCircle2 className="h-4 w-4" />{decision.label}</div>
             <div className="mt-1 text-[11px] text-muted-foreground">Logged to the audit trail. See the Activity tab.</div>
+          </div>
+        ) : isJunior ? (
+          <div className="mt-3 space-y-2 text-sm">
+            {canDecide ? (
+              <Button variant="primary" className="w-full" onClick={onApprove}>Approve recommendation</Button>
+            ) : (
+              <Button variant="primary" className="w-full" onClick={onEscalate}>Escalate to senior</Button>
+            )}
+            <div className="rounded-lg border border-border bg-secondary/40 p-2.5 text-[11px] text-muted-foreground">
+              Overrides and declines are senior-underwriter decisions. You can approve within your authority or escalate.
+            </div>
           </div>
         ) : (
           <div className="mt-3 space-y-2 text-sm">

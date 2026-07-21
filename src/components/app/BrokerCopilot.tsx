@@ -24,6 +24,7 @@ import {
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
+import { useRole } from "./role";
 import {
   communicationQueue,
   COMM_TYPE_LABEL,
@@ -84,7 +85,7 @@ const FILTERS: { key: string; label: string }[] = [
   { key: "NO_RESPONSE_FOLLOWUP", label: "Follow-up" },
 ];
 
-type DraftState = { body: string; status: CommStatus; reviewed: boolean; editedPct: number | null; activity: ActivityEntry[] };
+type DraftState = { body: string; status: CommStatus; reviewed: boolean; editedPct: number | null; sentToSenior?: boolean; activity: ActivityEntry[] };
 
 function changedPct(orig: string, cur: string): number {
   if (orig === cur) return 0;
@@ -161,8 +162,15 @@ export function BrokerCopilot() {
     const next = !st.reviewed;
     patch(selected, { reviewed: next }, next ? { who: "Compliance", what: "Non-renewal notice compliance-reviewed" } : undefined);
   }
+  function sendToSenior() {
+    patch(selected, { sentToSenior: true }, { who: "Sofia A. (Jr UW)", what: "Sent to senior for review", ctx: `${COMM_TYPE_LABEL[draft.type]} — sensitive` });
+  }
 
-  const resolved = st.status === "SENT" || st.status === "DISCARDED";
+  const { role } = useRole();
+  const isJunior = role === "junior";
+  const juniorSensitive = isJunior && draft.sensitive;
+
+  const resolved = st.status === "SENT" || st.status === "DISCARDED" || !!st.sentToSenior;
   const sendBlocked = draft.requiresComplianceReview && !st.reviewed;
 
   return (
@@ -251,15 +259,23 @@ export function BrokerCopilot() {
                 </div>
               </div>
               {resolved ? (
-                <Chip tone={st.status === "SENT" ? "success" : "neutral"}><CheckCircle2 className="h-3 w-3" /> {st.status === "SENT" ? "Sent" : "Discarded"}</Chip>
+                <Chip tone={st.status === "SENT" ? "success" : st.sentToSenior ? "accent" : "neutral"}>
+                  <CheckCircle2 className="h-3 w-3" /> {st.status === "SENT" ? "Sent" : st.sentToSenior ? "With senior review" : "Discarded"}
+                </Chip>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="ghost" onClick={regenerate}><RotateCcw className="h-4 w-4" />Regenerate</Button>
                   {editMode ? null : <Button variant="secondary" onClick={() => setEditMode(true)}><Pencil className="h-4 w-4" />Edit</Button>}
                   <Button variant="danger" onClick={discard}><Trash2 className="h-4 w-4" />Discard</Button>
-                  <Button variant="primary" onClick={approveSend} disabled={sendBlocked} title={sendBlocked ? "Compliance review required before sending" : "Approve & send"}>
-                    Approve & Send <Send className="h-3.5 w-3.5" />
-                  </Button>
+                  {juniorSensitive ? (
+                    <Button variant="primary" onClick={sendToSenior} title="Sensitive communications are approved by a senior underwriter">
+                      Send to senior for review <ArrowUpRight className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : (
+                    <Button variant="primary" onClick={approveSend} disabled={sendBlocked} title={sendBlocked ? "Compliance review required before sending" : "Approve & send"}>
+                      Approve & Send <Send className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

@@ -26,6 +26,7 @@ import {
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
+import { useRole, JUNIOR_PREMIUM_CAP, parseMoney } from "./role";
 import {
   renewals,
   getRenewalDetail,
@@ -120,7 +121,7 @@ function dirTone(d: Direction) {
 
 /* ---------------------------- main ---------------------------- */
 
-type Decision = { action: "approved" | "changes" | "info" | "nonrenew" | null; label?: string };
+type Decision = { action: "approved" | "changes" | "info" | "nonrenew" | "escalated" | null; label?: string };
 
 export function RenewalManagement() {
   const [selected, setSelected] = useState(renewals[0].id);
@@ -133,9 +134,14 @@ export function RenewalManagement() {
   const [overrideReason, setOverrideReason] = useState("");
   const [draft, setDraft] = useState<null | "terms" | "nonrenew">(null);
 
+  const { role } = useRole();
+  const isJunior = role === "junior";
+
   const r = renewals.find((x) => x.id === selected)!;
   const d = details[selected];
   const decision = decisions[selected] ?? { action: null };
+  const overCap = parseMoney(r.indicated) > JUNIOR_PREMIUM_CAP;
+  const canDecide = !isJunior || (!overCap && d.hardRulePassed && d.recommendation !== "NON_RENEW");
 
   const attention = useMemo(() => Object.values(details).filter((x) => x.timing.lapseRisk || !x.hardRulePassed).length, [details]);
 
@@ -155,6 +161,14 @@ export function RenewalManagement() {
   function requestInfo() {
     setDecisions((prev) => ({ ...prev, [selected]: { action: "info", label: "Requested information" } }));
     setDraft("terms");
+  }
+  function escalate() {
+    setDecisions((prev) => ({ ...prev, [selected]: { action: "escalated", label: "Escalated to senior" } }));
+    logActivity({
+      who: "Sofia A. (Jr UW)",
+      what: "Escalated to senior underwriter",
+      ctx: overCap ? "above authority limit" : !d.hardRulePassed ? "appetite drift / non-renew" : "escalated decision",
+    });
   }
   function confirmOverride() {
     if (!override) return;
@@ -236,13 +250,15 @@ export function RenewalManagement() {
                 </div>
               </div>
               {decision.action ? (
-                <Chip tone={decision.action === "nonrenew" ? "danger" : decision.action === "changes" ? "warn" : "success"}>
+                <Chip tone={decision.action === "nonrenew" ? "danger" : decision.action === "escalated" ? "accent" : decision.action === "changes" ? "warn" : "success"}>
                   <CheckCircle2 className="h-3 w-3" /> {decision.label}
                 </Chip>
               ) : (
                 <div className="flex items-center gap-2">
                   <Button variant="secondary" onClick={requestInfo}>Request information</Button>
-                  {d.recommendation === "NON_RENEW" ? (
+                  {!canDecide ? (
+                    <Button variant="primary" onClick={escalate}>Escalate to senior <ArrowRight className="h-4 w-4" /></Button>
+                  ) : d.recommendation === "NON_RENEW" ? (
                     <Button variant="danger" onClick={approve}>Non-renew</Button>
                   ) : (
                     <Button variant="primary" onClick={approve}>Approve renewal <ArrowRight className="h-4 w-4" /></Button>
@@ -250,6 +266,14 @@ export function RenewalManagement() {
                 </div>
               )}
             </div>
+
+            {isJunior && !decision.action && (
+              <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <ShieldAlert className="h-3.5 w-3.5 text-accent" />
+                Your authority: renew up to ${JUNIOR_PREMIUM_CAP.toLocaleString()}.
+                {overCap ? " Above your limit — route to a senior." : !d.hardRulePassed ? " Appetite-drift / non-renewals are a senior decision." : ""}
+              </div>
+            )}
 
             {/* Appetite-drift / hard-fail banner (RN-10) */}
             {!d.hardRulePassed && (
@@ -318,7 +342,7 @@ export function RenewalManagement() {
               {tab === "Appetite recheck" && <AppetiteTab d={d} />}
               {tab === "Loss & timing" && <LossTimingTab d={d} />}
               {tab === "Recommendation" && (
-                <RecommendationTab d={d} decision={decision} onApprove={approve} onOverride={(x) => setOverride(x)} onDraftTerms={() => setDraft("terms")} onDraftNonRenew={() => setDraft("nonrenew")} />
+                <RecommendationTab d={d} decision={decision} isJunior={isJunior} canDecide={canDecide} onApprove={approve} onOverride={(x) => setOverride(x)} onEscalate={escalate} onDraftTerms={() => setDraft("terms")} onDraftNonRenew={() => setDraft("nonrenew")} />
               )}
               {tab === "Activity" && <ActivityTab d={d} />}
             </div>
@@ -488,9 +512,9 @@ function LossTimingTab({ d }: { d: RenewalDetail }) {
 /* ---------------------------- Recommendation tab ---------------------------- */
 
 function RecommendationTab({
-  d, decision, onApprove, onOverride, onDraftTerms, onDraftNonRenew,
+  d, decision, isJunior, canDecide, onApprove, onOverride, onEscalate, onDraftTerms, onDraftNonRenew,
 }: {
-  d: RenewalDetail; decision: Decision; onApprove: () => void; onOverride: (r: RenewalRecommendation) => void; onDraftTerms: () => void; onDraftNonRenew: () => void;
+  d: RenewalDetail; decision: Decision; isJunior: boolean; canDecide: boolean; onApprove: () => void; onOverride: (r: RenewalRecommendation) => void; onEscalate: () => void; onDraftTerms: () => void; onDraftNonRenew: () => void;
 }) {
   const tone = recTone(d.recommendation);
   const border = tone === "success" ? "border-success/40 bg-success/5" : tone === "danger" ? "border-destructive/40 bg-destructive/5" : "border-warn/40 bg-warn/5";
@@ -544,6 +568,17 @@ function RecommendationTab({
           <div className="mt-3 rounded-lg border border-success/30 bg-success/5 p-3 text-sm">
             <div className="flex items-center gap-2 font-medium text-success"><CheckCircle2 className="h-4 w-4" />{decision.label}</div>
             <div className="mt-1 text-[11px] text-muted-foreground">Logged to the audit trail.</div>
+          </div>
+        ) : isJunior ? (
+          <div className="mt-3 space-y-2 text-sm">
+            {canDecide ? (
+              <Button variant="primary" className="w-full" onClick={onApprove}>Approve — {RENEWAL_REC_LABEL[d.recommendation]}</Button>
+            ) : (
+              <Button variant="primary" className="w-full" onClick={onEscalate}>Escalate to senior</Button>
+            )}
+            <div className="rounded-lg border border-border bg-secondary/40 p-2.5 text-[11px] text-muted-foreground">
+              Overrides, non-renewals, and appetite-drift cases are senior-underwriter decisions.
+            </div>
           </div>
         ) : (
           <div className="mt-3 space-y-2 text-sm">

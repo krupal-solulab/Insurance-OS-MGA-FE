@@ -21,6 +21,7 @@ import {
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
+import { useRole, SeniorOnlyNote } from "./role";
 
 /* ============================================================
    Rules Console
@@ -318,6 +319,8 @@ export function RulesConsole() {
   const [note, setNote] = useState("");
   const [testResults, setTestResults] = useState<EvalResult[] | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const { role } = useRole();
+  const isJunior = role === "junior";
 
   // Load persisted store after mount (avoids SSR hydration mismatch).
   useEffect(() => {
@@ -461,13 +464,19 @@ export function RulesConsole() {
               <Play className="h-4 w-4" />
               Test against submission
             </Button>
-            <Button variant="primary" onClick={publish} disabled={readOnly || !parse.ok || !dirty}>
+            <Button variant="primary" onClick={publish} disabled={isJunior || readOnly || !parse.ok || !dirty}>
               <UploadCloud className="h-4 w-4" />
               Publish version
             </Button>
           </>
         }
       />
+
+      {isJunior && (
+        <SeniorOnlyNote>
+          View only — appetite &amp; validation rules are authored, published, and rolled back by a <b className="text-foreground">senior underwriter</b>. Switch to Senior UW to edit.
+        </SeniorOnlyNote>
+      )}
 
       {/* Category selector */}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -507,7 +516,7 @@ export function RulesConsole() {
               <div className="flex items-center gap-2">
                 {readOnly ? (
                   <>
-                    <Button variant="secondary" onClick={() => restoreIntoDraft(viewedVersion!.v)}>
+                    <Button variant="secondary" onClick={() => restoreIntoDraft(viewedVersion!.v)} disabled={isJunior}>
                       <RotateCcw className="h-4 w-4" />
                       Restore to draft
                     </Button>
@@ -515,11 +524,11 @@ export function RulesConsole() {
                   </>
                 ) : (
                   <>
-                    <Button variant="ghost" onClick={addRule} disabled={!parse.ok}>
+                    <Button variant="ghost" onClick={addRule} disabled={isJunior || !parse.ok}>
                       <Plus className="h-4 w-4" />
                       Add rule
                     </Button>
-                    <Button variant="ghost" onClick={formatDraft} disabled={!parse.ok}>
+                    <Button variant="ghost" onClick={formatDraft} disabled={isJunior || !parse.ok}>
                       <Braces className="h-4 w-4" />
                       Format
                     </Button>
@@ -547,7 +556,7 @@ export function RulesConsole() {
 
             <textarea
               spellCheck={false}
-              readOnly={readOnly}
+              readOnly={readOnly || isJunior}
               value={editorValue}
               onChange={(e) => setDraft(e.target.value)}
               className={cn(
@@ -573,7 +582,7 @@ export function RulesConsole() {
                   placeholder="Version note (optional) — e.g. 'Tightened TIV cap to $200M'"
                   className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-foreground/40"
                 />
-                <Button variant="primary" onClick={publish} disabled={!parse.ok || !dirty}>
+                <Button variant="primary" onClick={publish} disabled={isJunior || !parse.ok || !dirty}>
                   <UploadCloud className="h-4 w-4" />
                   Publish v{cs.versions.length + 1}
                 </Button>
@@ -638,8 +647,8 @@ export function RulesConsole() {
                         variant="secondary"
                         className="!py-1 !text-xs"
                         onClick={() => rollbackTo(v.v)}
-                        disabled={isActive}
-                        title={isActive ? "This version is already active" : `Publish a copy of v${v.v} as the active version`}
+                        disabled={isActive || isJunior}
+                        title={isJunior ? "Senior underwriters roll back rules" : isActive ? "This version is already active" : `Publish a copy of v${v.v} as the active version`}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         Rollback

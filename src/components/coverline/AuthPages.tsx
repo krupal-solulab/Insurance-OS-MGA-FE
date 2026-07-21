@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { ArrowRight, Loader2, AlertTriangle, Check, ShieldCheck, ScrollText, Sparkles } from "lucide-react";
+import { setStoredRole, resolveRoleFromLogin, DEMO_LOGINS } from "@/components/app/role";
 
 /* ============================================================
    Login / Signup — UI ONLY (no auth backend wired).
@@ -196,6 +197,8 @@ export function LoginPage() {
 
     setLoading(true);
     // TODO(auth): replace with a real sign-in call. UI-only today.
+    // Demo logins set the role; everyone else defaults to Senior.
+    setStoredRole(resolveRoleFromLogin(email, password));
     await new Promise((r) => setTimeout(r, 800));
     go("/app");
   };
@@ -248,6 +251,32 @@ export function LoginPage() {
         </SubmitButton>
       </form>
 
+      {/* Prototype demo logins */}
+      <div className="mt-6 rounded-lg border border-border bg-secondary/40 p-3 text-[12px]">
+        <div className="mb-1.5 flex items-center gap-1.5 font-medium text-foreground">
+          <Sparkles className="h-3.5 w-3.5 text-accent" /> Demo logins
+        </div>
+        <ul className="space-y-1 text-ink-soft">
+          {DEMO_LOGINS.map((d) => (
+            <li key={d.email} className="flex items-center justify-between gap-2">
+              <span>{d.label}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail(d.email);
+                  setPassword(d.password);
+                }}
+                className="font-mono text-[11px] text-foreground underline-offset-2 hover:text-accent hover:underline"
+                title="Click to fill"
+              >
+                {d.email} · {d.password}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-1.5 text-[10px] text-muted-foreground">Any other email signs in as Senior. Prototype only — no real accounts.</div>
+      </div>
+
       <p className="mt-6 text-sm text-ink-soft">
         New to Coverline?{" "}
         <a href="/signup" className="font-medium text-foreground underline-offset-4 hover:text-accent hover:underline">
@@ -296,6 +325,8 @@ export function SignupPage() {
 
     setLoading(true);
     // TODO(auth): replace with a real account-creation call. UI-only today.
+    // A new workspace owner is a Senior/Admin by default.
+    setStoredRole("senior");
     await new Promise((r) => setTimeout(r, 900));
     go("/app");
   };

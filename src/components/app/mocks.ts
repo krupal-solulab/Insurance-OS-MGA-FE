@@ -413,6 +413,175 @@ export function getTriageDetail(s: Submission): TriageDetail {
   return explicitTriage[s.id] ?? buildDefaultTriage(s);
 }
 
+/* ============================================================
+   Quoting & Rating Support — rate plan as data + a pure rating
+   function. No backend: the "rating engine" is a deterministic
+   function over the rate table. Swap `rate()` for a real rating
+   API later; everything else reuses Triage's extracted data.
+   ============================================================ */
+
+export type QuoteEndorsement = { key: string; label: string; loading: number; defaultOn: boolean };
+
+export type RatePlan = {
+  version: string;
+  classLossCostPer1kTIV: Record<string, number>;
+  defaultLossCost: number;
+  // deductible in $k → factor (interpolated between points)
+  deductibleFactors: { ded: number; factor: number }[];
+  limitLoadingPerM: number; // per $1M excess above the $5M base
+  baseLimitM: number;
+  endorsements: QuoteEndorsement[];
+  commissionPct: number;
+  targetLossRatio: number;
+  expenseRatio: number;
+};
+
+export const ratePlan: RatePlan = {
+  version: "Rate Plan v2.4",
+  classLossCostPer1kTIV: {
+    "Warehousing / cold storage": 3.98,
+    "General contractor": 4.6,
+    "Hotels / restaurants": 5.2,
+    "Senior care": 4.1,
+    "Marine terminal ops": 6.4,
+    "Data center": 2.9,
+  },
+  defaultLossCost: 4.5,
+  deductibleFactors: [
+    { ded: 10, factor: 1.12 },
+    { ded: 25, factor: 1.0 },
+    { ded: 50, factor: 0.92 },
+    { ded: 100, factor: 0.83 },
+  ],
+  limitLoadingPerM: 0.03,
+  baseLimitM: 5,
+  endorsements: [
+    { key: "spoilage", label: "Spoilage — $500k sub-limit", loading: 0.03, defaultOn: true },
+    { key: "service_interruption", label: "Service interruption — 72hr", loading: 0.02, defaultOn: true },
+    { key: "ordinance", label: "Ordinance & law", loading: 0.025, defaultOn: false },
+    { key: "equipment_breakdown", label: "Equipment breakdown", loading: 0.02, defaultOn: false },
+  ],
+  commissionPct: 0.15,
+  targetLossRatio: 0.55,
+  expenseRatio: 0.32,
+};
+
+export type QuoteFactor = { label: string; contribution: number; source: string };
+export type QuoteResult = {
+  premium: number;
+  band: [number, number];
+  ratePer1kTIV: number;
+  commission: number;
+  projectedLossRatio: number;
+  combinedRatio: number;
+  factors: QuoteFactor[];
+};
+
+export type QuoteBase = {
+  submissionId: string;
+  insured: string;
+  lob: string;
+  className: string;
+  tiv: number; // dollars
+  lossRatio: number; // 0–1, from loss run
+  appetite: Submission["appetite"];
+  inAppetite: boolean;
+};
+
+const tivToNum = (s: string) => {
+  const n = parseFloat(s.replace(/[^0-9.]/g, "")) || 0;
+  return /m/i.test(s) ? n * 1_000_000 : /k/i.test(s) ? n * 1_000 : n;
+};
+
+export function getQuoteBase(s: Submission): QuoteBase {
+  // Illustrative 5-yr loss ratio derived from the AI risk score (higher score → lower LR).
+  const lossRatio = Math.max(0.12, Math.min(0.7, 0.62 - (s.score || 40) / 260));
+  return {
+    submissionId: s.id,
+    insured: s.insured,
+    lob: s.lob,
+    className: s.industry,
+    tiv: tivToNum(s.tiv),
+    lossRatio,
+    appetite: s.appetite,
+    inAppetite: s.appetite !== "Out of appetite",
+  };
+}
+
+function dedFactor(dedK: number): number {
+  const pts = ratePlan.deductibleFactors;
+  if (dedK <= pts[0].ded) return pts[0].factor;
+  if (dedK >= pts[pts.length - 1].ded) return pts[pts.length - 1].factor;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (dedK >= a.ded && dedK <= b.ded) {
+      const t = (dedK - a.ded) / (b.ded - a.ded);
+      return a.factor + t * (b.factor - a.factor);
+    }
+  }
+  return 1;
+}
+
+/** Pure, explainable rating function over the rate plan. */
+export function rate(
+  base: QuoteBase,
+  inputs: { deductibleK: number; limitM: number; endorsements: string[] },
+): QuoteResult {
+  const tivK = base.tiv / 1000;
+  const lossCost = ratePlan.classLossCostPer1kTIV[base.className] ?? ratePlan.defaultLossCost;
+  const baseTechnical = lossCost * tivK; // technical base premium
+
+  const factors: QuoteFactor[] = [];
+  factors.push({ label: `Base loss cost · ${base.className}`, contribution: baseTechnical, source: `Rate plan · $${lossCost.toFixed(2)}/\$1k TIV × ${tivK.toLocaleString()}k` });
+
+  let premium = baseTechnical;
+
+  // Loss-history credit (better than target LR → credit)
+  const lossCredit = base.lossRatio < ratePlan.targetLossRatio ? -0.06 : 0.05;
+  const lossDelta = premium * lossCredit;
+  premium += lossDelta;
+  factors.push({ label: `Loss-history ${lossCredit < 0 ? "credit" : "load"}`, contribution: lossDelta, source: `5yr loss ratio ${(base.lossRatio * 100).toFixed(0)}% vs target ${(ratePlan.targetLossRatio * 100).toFixed(0)}%` });
+
+  // Deductible factor
+  const df = dedFactor(inputs.deductibleK);
+  const beforeDed = premium;
+  premium *= df;
+  factors.push({ label: `Deductible $${inputs.deductibleK}k`, contribution: premium - beforeDed, source: `Rate plan factor ×${df.toFixed(3)}` });
+
+  // Excess limit loading
+  const extraM = Math.max(0, inputs.limitM - ratePlan.baseLimitM);
+  const limitLoad = premium * ratePlan.limitLoadingPerM * extraM;
+  premium += limitLoad;
+  if (extraM > 0)
+    factors.push({ label: `Excess limit +$${extraM}M`, contribution: limitLoad, source: `${(ratePlan.limitLoadingPerM * 100).toFixed(1)}%/\$M above $${ratePlan.baseLimitM}M` });
+
+  // Endorsement loadings
+  for (const key of inputs.endorsements) {
+    const e = ratePlan.endorsements.find((x) => x.key === key);
+    if (!e) continue;
+    const load = premium * e.loading;
+    premium += load;
+    factors.push({ label: e.label, contribution: load, source: `+${(e.loading * 100).toFixed(1)}% endorsement loading` });
+  }
+
+  premium = Math.round(premium);
+  const ratePer1kTIV = premium / tivK;
+  const commission = Math.round(premium * ratePlan.commissionPct);
+  const projectedLossRatio = base.lossRatio * (1 / df) * 0.9; // deductible improves LR
+  const combinedRatio = projectedLossRatio + ratePlan.expenseRatio;
+
+  return {
+    premium,
+    band: [Math.round(premium * 0.96), Math.round(premium * 1.05)],
+    ratePer1kTIV,
+    commission,
+    projectedLossRatio,
+    combinedRatio,
+    factors,
+  };
+}
+
 export function nowClock(): string {
   const d = new Date();
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;

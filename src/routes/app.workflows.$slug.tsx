@@ -2,7 +2,6 @@ import type React from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
   Endorsements,
-  Quoting,
   BindOrder,
   AppetiteGovernance,
   Portfolio,
@@ -12,6 +11,7 @@ import { SubmissionTriage } from "@/components/app/SubmissionTriage";
 import { RenewalManagement } from "@/components/app/RenewalManagement";
 import { BrokerCopilot } from "@/components/app/BrokerCopilot";
 import { BordereauReporting } from "@/components/app/BordereauReporting";
+import { QuotingRating } from "@/components/app/QuotingRating";
 import { RulesConsole } from "@/components/app/RulesConsole";
 
 const map: Record<string, React.ComponentType> = {
@@ -19,7 +19,7 @@ const map: Record<string, React.ComponentType> = {
   "renewal-management": RenewalManagement,
   "broker-copilot": BrokerCopilot,
   endorsements: Endorsements,
-  quoting: Quoting,
+  quoting: QuotingRating,
   bind: BindOrder,
   appetite: AppetiteGovernance,
   portfolio: Portfolio,

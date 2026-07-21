@@ -21,6 +21,7 @@ import { Link } from "@tanstack/react-router";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
+import { useRole, SeniorOnlyNote } from "./role";
 import { bordereaux, nowClock, type Bordereau, type BordereauChecks, type CheckStatus, type ActivityEntry } from "./mocks";
 
 /* ============================================================
@@ -115,6 +116,9 @@ export function BordereauReporting() {
     Object.fromEntries(bordereaux.map((b) => [b.id, { checks: structuredClone(b.checks), filed: false, amendments: [...b.amendments], activity: [...b.activity] }])),
   );
 
+  const { role } = useRole();
+  const isJunior = role === "junior";
+
   const b = bordereaux.find((x) => x.id === selected)!;
   const st = state[selected];
   const blocked = isBlocked(st.checks);
@@ -192,16 +196,24 @@ export function BordereauReporting() {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="secondary" onClick={reRun}><RefreshCcw className="h-4 w-4" />Re-run checks</Button>
-                <Button variant="secondary" disabled={blocked || st.filed}><Download className="h-4 w-4" />Generate Excel</Button>
+                <Button variant="secondary" disabled={isJunior || blocked || st.filed}><Download className="h-4 w-4" />Generate Excel</Button>
                 {st.filed ? (
                   <Chip tone="success"><CheckCircle2 className="h-3 w-3" /> Submitted</Chip>
                 ) : (
-                  <Button variant="primary" onClick={submit} disabled={blocked} title={blocked ? "Resolve all failing checks first" : "Approve & submit to carrier"}>
+                  <Button variant="primary" onClick={submit} disabled={isJunior || blocked} title={isJunior ? "A senior underwriter approves & submits" : blocked ? "Resolve all failing checks first" : "Approve & submit to carrier"}>
                     Approve &amp; submit <Send className="h-3.5 w-3.5" />
                   </Button>
                 )}
               </div>
             </div>
+
+            {isJunior && (
+              <div className="mt-4">
+                <SeniorOnlyNote>
+                  View only — you can review the checks, but resolving issues and submitting a bordereau is a <b className="text-foreground">senior underwriter</b> action.
+                </SeniorOnlyNote>
+              </div>
+            )}
 
             {/* Overall status banner */}
             <div className={cn("mt-4 flex items-start gap-3 rounded-xl border-2 p-4", st.filed ? "border-success/40 bg-success/5" : blocked ? "border-destructive/40 bg-destructive/5" : "border-success/40 bg-success/5")}>
@@ -244,7 +256,7 @@ export function BordereauReporting() {
                       ))}
                     </ul>
                   )}
-                  {kind === "fail" && !st.filed && (
+                  {kind === "fail" && !st.filed && !isJunior && (
                     <div className="mt-3"><Button variant="secondary" className="!py-1 !text-xs" onClick={() => resolve(k)}>{RESOLVE_VERB[k]}</Button></div>
                   )}
                 </div>
