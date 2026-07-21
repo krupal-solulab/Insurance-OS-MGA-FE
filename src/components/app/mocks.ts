@@ -417,3 +417,295 @@ export function nowClock(): string {
   const d = new Date();
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+
+/* ============================================================
+   Renewal Management — PRD-aligned detail model.
+   Appetite rules are the SAME shared set as Submission Triage
+   (see AppetiteResult) — Renewal re-runs them against the
+   *current* rule version and flags drift. The comparison /
+   change-detection layer (below) is renewal-specific.
+   Mock data only; shaped like the Renewal PRD's Section 7.2.
+   ============================================================ */
+
+export type RenewalRecommendation = "RENEW_AS_IS" | "RENEW_WITH_CHANGES" | "NON_RENEW";
+
+export const RENEWAL_REC_LABEL: Record<RenewalRecommendation, string> = {
+  RENEW_AS_IS: "Renew as-is",
+  RENEW_WITH_CHANGES: "Renew with changes",
+  NON_RENEW: "Non-renew",
+};
+
+export type ChangeCategory = "exposure" | "loss" | "appetite" | "timing" | "info";
+export type Direction = "favorable" | "unfavorable" | "neutral";
+export type PriorSource = "PAS" | "stored_triage_record" | "manual_queue";
+
+export type CompareRow = {
+  label: string;
+  prior: string;
+  current: string;
+  change?: string;
+  direction?: Direction;
+  strong?: boolean;
+};
+export type ChangeFlag = { category: ChangeCategory; label: string; detail: string; direction: Direction };
+export type LossChange = { type: "new_claim" | "status_change" | "favorable_closure" | "trend"; description: string; direction: Direction; source?: string };
+export type RenewalChangeItem = { item: string; reason: string; source?: string };
+
+export type RenewalDetail = {
+  recommendation: RenewalRecommendation;
+  confidence: number;
+  processing: ProcessingState;
+  priorSource: PriorSource;
+  rulesVersion: string;
+  rulesVersionAtBinding: string;
+  hardRulePassed: boolean;
+  appetite: AppetiteResult[];
+  appetiteDrift?: string; // RN-10 call-out
+  comparison: CompareRow[];
+  changeFlags: ChangeFlag[];
+  lossChanges: LossChange[];
+  timing: { daysToExpiration: number; lapseRisk: boolean; noSubmission: boolean };
+  changes: RenewalChangeItem[]; // "renew with changes" specifics
+  narrative: string;
+  citations: string[];
+  broker: { name: string; agency: string; tenure: string; note: string };
+  activity: ActivityEntry[];
+};
+
+const explicitRenewals: Record<string, RenewalDetail> = {
+  "REN-24-4102": {
+    recommendation: "RENEW_WITH_CHANGES",
+    confidence: 0.9,
+    processing: "ready",
+    priorSource: "stored_triage_record",
+    rulesVersion: "ACORD v3 · Combined v3",
+    rulesVersionAtBinding: "ACORD v3",
+    hardRulePassed: true,
+    appetite: [
+      { rule: "TIV under $250M", pass: true, hard: true, detail: "$42.8M" },
+      { rule: "State permitted", pass: true, hard: true, detail: "FL" },
+      { rule: "Class code permitted", pass: true, hard: true, detail: "Cold storage warehousing" },
+      { rule: "Loss ratio 5yr < 55%", pass: true, hard: false, detail: "38%" },
+      { rule: "Sprinklered ≥ 80% TIV", pass: true, hard: true, detail: "92%" },
+    ],
+    comparison: [
+      { label: "Named insured", prior: "Palmetto Cold Storage LLC", current: "Palmetto Cold Storage LLC" },
+      { label: "Locations", prior: "12", current: "14", change: "+2", direction: "unfavorable" },
+      { label: "TIV", prior: "$38.4M", current: "$42.8M", change: "+11.5%", direction: "unfavorable" },
+      { label: "Payroll", prior: "$4.2M", current: "$4.8M", change: "+14.3%", direction: "unfavorable" },
+      { label: "Annual revenue", prior: "$36.9M", current: "$41.2M", change: "+11.7%", direction: "unfavorable" },
+      { label: "Sprinklered TIV", prior: "88%", current: "92%", change: "+4pp", direction: "favorable" },
+      { label: "Open claims", prior: "1", current: "1", direction: "neutral" },
+      { label: "Indicated premium", prior: "$168,900", current: "$187,400", change: "+10.9%", direction: "unfavorable", strong: true },
+    ],
+    changeFlags: [
+      { category: "exposure", label: "Revenue +11.7% / payroll +14.3%", detail: "Rate & limit adequacy review warranted (RN-01)", direction: "unfavorable" },
+      { category: "exposure", label: "2 new refrigerated locations", detail: "Inspected Nov 2025 — no material findings", direction: "neutral" },
+    ],
+    lossChanges: [{ type: "trend", description: "Loss trend flat over the expiring term; 5yr LR steady at 38%", direction: "favorable", source: "Loss_Run_5yr.pdf" }],
+    timing: { daysToExpiration: 31, lapseRisk: false, noSubmission: false },
+    changes: [
+      { item: "Rate / limit adequacy review", reason: "Stated revenue up 11.7% and payroll up 14.3% since prior term", source: "Financials FY24 · ACORD 125" },
+      { item: "Spoilage sub-limit refresh to $500k", reason: "Broker request; consistent with expanded cold-storage exposure", source: "Broker email" },
+      { item: "Refreshed sprinkler certification", reason: "Two new locations added since last inspection", source: "SOV" },
+    ],
+    narrative:
+      "Payroll and revenue expansion (~+14% and +12%) plus two new refrigerated locations drive the indicated +10.9% rate change. Loss ratio remains excellent at 38%, sprinklered TIV improved to 92%. Account remains in appetite. Recommend renewal with a rate/limit review, a $500k spoilage sub-limit, and refreshed sprinkler certification.",
+    citations: ["ACORD_125_Palmetto.pdf p.2", "Financials_FY24.pdf p.3", "Loss_Run_5yr.pdf p.4"],
+    broker: { name: "Ana Ruiz", agency: "Marsh Southeast", tenure: "Broker for 4 years · 62 bound policies", note: "Insured is expanding into a third Jacksonville location. Would appreciate spoilage sub-limit confirmation and a 15-day extension if bind slips past Feb 12." },
+    activity: [
+      { at: "08:40", who: "AI · Extraction Core", what: "Renewal documents parsed", ctx: "prior term from stored triage record", conf: "96%" },
+      { at: "08:41", who: "AI · Decision Core", what: "Recommended RENEW_WITH_CHANGES", ctx: "exposure growth review", conf: "90%" },
+    ],
+  },
+
+  "REN-24-4101": {
+    recommendation: "RENEW_WITH_CHANGES",
+    confidence: 0.82,
+    processing: "ready",
+    priorSource: "PAS",
+    rulesVersion: "ACORD v3 · Combined v3",
+    rulesVersionAtBinding: "ACORD v2",
+    hardRulePassed: true,
+    appetite: [
+      { rule: "TIV under $250M", pass: true, hard: true, detail: "$88.0M" },
+      { rule: "State permitted", pass: false, hard: false, detail: "New state AZ — licensing check required" },
+      { rule: "Class code permitted", pass: true, hard: true, detail: "Hotels / restaurants" },
+      { rule: "Loss ratio 5yr < 55%", pass: true, hard: false, detail: "42%" },
+    ],
+    comparison: [
+      { label: "Named insured", prior: "Highline Hospitality Group", current: "Highline Hospitality Group" },
+      { label: "Locations", prior: "3", current: "4", change: "+1 · Scottsdale AZ", direction: "unfavorable" },
+      { label: "States of operation", prior: "NV", current: "NV, AZ", change: "+AZ", direction: "unfavorable" },
+      { label: "TIV", prior: "$74.5M", current: "$88.0M", change: "+18.1%", direction: "unfavorable" },
+      { label: "Open claims", prior: "2", current: "2", direction: "neutral" },
+      { label: "Indicated premium", prior: "$388,200", current: "$421,000", change: "+8.4%", direction: "unfavorable", strong: true },
+    ],
+    changeFlags: [
+      { category: "exposure", label: "New location + new state (AZ)", detail: "State-licensing / appetite check required before renewal (RN-04)", direction: "unfavorable" },
+      { category: "timing", label: "Lapse risk — 4 days to expiration", detail: "Renewal submission arrived late; expedite to avoid coverage gap (RN-11)", direction: "unfavorable" },
+    ],
+    lossChanges: [{ type: "trend", description: "Loss ratio steady at 42%; no new large losses in the expiring term", direction: "neutral" }],
+    timing: { daysToExpiration: 4, lapseRisk: true, noSubmission: false },
+    changes: [
+      { item: "Confirm AZ licensing / appetite for new location", reason: "New state of operation added since prior term", source: "Renewal questionnaire" },
+      { item: "Expedite bind — lapse risk", reason: "Only 4 business days to expiration", source: "Timing check" },
+    ],
+    narrative:
+      "Highline added a fourth location in Scottsdale AZ — a new state of operation that requires a licensing/appetite check before renewal (RN-04). Loss ratio is stable at 42%. Submission arrived close to expiration, creating lapse risk (RN-11). Recommend renewal with changes once the AZ check clears; expedite to avoid a coverage gap.",
+    citations: ["Renewal_Questionnaire.pdf p.1", "Loss_Run.pdf p.2"],
+    broker: { name: "Jordan Blake", agency: "RT Specialty", tenure: "Broker for 2 years · 39 bound policies", note: "New Scottsdale property opens in March. Can we confirm terms this week — the current policy expires Feb 20." },
+    activity: [
+      { at: "09:02", who: "AI · Decision Core", what: "Flagged new-state exposure + lapse risk", ctx: "AZ licensing check", conf: "82%" },
+    ],
+  },
+
+  "REN-24-4100": {
+    recommendation: "RENEW_AS_IS",
+    confidence: 0.95,
+    processing: "ready",
+    priorSource: "PAS",
+    rulesVersion: "ACORD v3 · Combined v3",
+    rulesVersionAtBinding: "ACORD v3",
+    hardRulePassed: true,
+    appetite: [
+      { rule: "TIV under $250M", pass: true, hard: true, detail: "$22.1M" },
+      { rule: "State permitted", pass: true, hard: true, detail: "PA" },
+      { rule: "Class code permitted", pass: true, hard: true, detail: "Senior care" },
+      { rule: "Loss ratio 5yr < 55%", pass: true, hard: false, detail: "29%" },
+    ],
+    comparison: [
+      { label: "Named insured", prior: "Cedar Grove Assisted Living", current: "Cedar Grove Assisted Living" },
+      { label: "Locations", prior: "2", current: "2", direction: "neutral" },
+      { label: "TIV", prior: "$21.4M", current: "$22.1M", change: "+3.3%", direction: "neutral" },
+      { label: "Annual revenue", prior: "$18.9M", current: "$19.4M", change: "+2.6%", direction: "neutral" },
+      { label: "Open claims", prior: "0", current: "0", direction: "favorable" },
+      { label: "Indicated premium", prior: "$112,700", current: "$118,400", change: "+5.1%", direction: "neutral", strong: true },
+    ],
+    changeFlags: [],
+    lossChanges: [{ type: "trend", description: "Clean loss history — 5yr LR 29%, no open claims", direction: "favorable" }],
+    timing: { daysToExpiration: 57, lapseRisk: false, noSubmission: false },
+    changes: [],
+    narrative:
+      "Cedar Grove is a clean senior-care renewal: no material exposure change, no new claims, 5-year loss ratio of 29%, and no appetite issues. The +5.1% indicated reflects standard trend only. Recommend renewing as-is.",
+    citations: ["Renewal_Questionnaire.pdf p.1", "Loss_Run.pdf p.3"],
+    broker: { name: "Emma O'Neill", agency: "Risk Placement Svcs.", tenure: "Broker for 6 years · 41 bound policies", note: "No changes this year — please renew on the same terms." },
+    activity: [{ at: "09:28", who: "AI · Decision Core", what: "Recommended RENEW_AS_IS", ctx: "clean — no material change", conf: "95%" }],
+  },
+
+  "REN-24-4099": {
+    recommendation: "NON_RENEW",
+    confidence: 0.88,
+    processing: "ready",
+    priorSource: "PAS",
+    rulesVersion: "ACORD v3 · Combined v3",
+    rulesVersionAtBinding: "ACORD v1",
+    hardRulePassed: false,
+    appetite: [
+      { rule: "Class code permitted", pass: false, hard: true, detail: "Reclassified class code now on excluded list (HR-03)" },
+      { rule: "TIV under $250M", pass: true, hard: true, detail: "$18.2M" },
+      { rule: "State permitted", pass: true, hard: true, detail: "CO" },
+      { rule: "Loss ratio 5yr < 55%", pass: false, hard: false, detail: "44% — elevated vs class" },
+    ],
+    appetiteDrift:
+      "Bound in appetite under rules v1 (Nov 2024). The account's class code was reclassified and is excluded under current rules v3 — the account itself did not change, the appetite rules did (RN-10). This must be stated explicitly and non-judgmentally in broker communication.",
+    comparison: [
+      { label: "Named insured", prior: "Ridgeline Contractors, Inc.", current: "Ridgeline Contractors, Inc." },
+      { label: "Class code", prior: "GC — general (in appetite v1)", current: "GC — excavation/grading (excluded v3)", change: "reclassified", direction: "unfavorable" },
+      { label: "5yr loss ratio", prior: "31%", current: "44%", change: "+13pp", direction: "unfavorable" },
+      { label: "Open claims", prior: "1", current: "2", change: "+1 new", direction: "unfavorable" },
+      { label: "Indicated premium", prior: "$91,400", current: "$96,200", change: "+5.3%", direction: "neutral", strong: true },
+    ],
+    changeFlags: [
+      { category: "appetite", label: "Appetite drift — class now excluded", detail: "Hard-rule fail under current rules v3 (HR-03)", direction: "unfavorable" },
+      { category: "loss", label: "New claim in expiring term", detail: "Loss ratio up 13pp; 1 new open claim (RN-06)", direction: "unfavorable" },
+    ],
+    lossChanges: [
+      { type: "new_claim", description: "One new claim opened in the expiring term ($64k incurred)", direction: "unfavorable", source: "Loss_Run.pdf p.1" },
+      { type: "trend", description: "Loss ratio deteriorated from 31% to 44%", direction: "unfavorable" },
+    ],
+    timing: { daysToExpiration: 48, lapseRisk: false, noSubmission: false },
+    changes: [],
+    narrative:
+      "Ridgeline no longer meets appetite: its class code was reclassified to excavation/grading, which is excluded under current rules v3 (HR-03) — a hard-rule fail. This is appetite drift, not account misconduct: it was in appetite at binding under rules v1. Loss experience has also deteriorated (44% vs 31%). Recommend non-renewal, framed as an appetite-rule change, with a compliance-reviewed notice.",
+    citations: ["Renewal_Questionnaire.pdf p.2", "Loss_Run.pdf p.1"],
+    broker: { name: "Michael Chen", agency: "Amwins Access", tenure: "Broker for 3 years · 51 bound policies", note: "Any flexibility on the Ridgeline renewal? They've been with us three years." },
+    activity: [
+      { at: "09:11", who: "AI · Decision Core", what: "Hard-rule fail (current rules) → NON_RENEW", ctx: "class excluded under v3 · appetite drift", conf: "88%" },
+    ],
+  },
+
+  "REN-24-4098": {
+    recommendation: "RENEW_WITH_CHANGES",
+    confidence: 0.91,
+    processing: "ready",
+    priorSource: "PAS",
+    rulesVersion: "ACORD v3 · Combined v3",
+    rulesVersionAtBinding: "ACORD v3",
+    hardRulePassed: true,
+    appetite: [
+      { rule: "TIV under $250M", pass: true, hard: true, detail: "$134.9M" },
+      { rule: "State permitted", pass: true, hard: true, detail: "VA" },
+      { rule: "Class code permitted", pass: true, hard: true, detail: "Data center" },
+      { rule: "Loss ratio 5yr < 55%", pass: true, hard: false, detail: "12% — excellent" },
+    ],
+    comparison: [
+      { label: "Named insured", prior: "Copperline Data Center Ops", current: "Copperline Data Center Ops" },
+      { label: "TIV", prior: "$128.0M", current: "$134.9M", change: "+5.4%", direction: "neutral" },
+      { label: "Cyber sub-limit", prior: "$5M", current: "$10M (requested)", change: "+$5M", direction: "unfavorable" },
+      { label: "Open claims", prior: "1", current: "0", change: "closed", direction: "favorable" },
+      { label: "Indicated premium", prior: "$584,100", current: "$612,300", change: "+4.8%", direction: "neutral", strong: true },
+    ],
+    changeFlags: [
+      { category: "loss", label: "Favorable claim resolution", detail: "$220k reserved claim closed at $60k paid — 73% under reserve (RN-07)", direction: "favorable" },
+      { category: "exposure", label: "Cyber sub-limit increase requested", detail: "$5M → $10M — coverage change, review pricing", direction: "neutral" },
+    ],
+    lossChanges: [
+      { type: "favorable_closure", description: "Prior open claim ($220k reserve) closed at $60k paid — 73% under reserve", direction: "favorable", source: "Loss_Run.pdf p.2" },
+      { type: "trend", description: "Loss ratio improving — 12%, best in class", direction: "favorable" },
+    ],
+    timing: { daysToExpiration: 47, lapseRisk: false, noSubmission: false },
+    changes: [{ item: "Cyber sub-limit increase to $10M", reason: "Broker request; price the additional $5M of cyber limit", source: "Renewal questionnaire" }],
+    narrative:
+      "Copperline is a strong, improving renewal: 5-year loss ratio of 12% and a prior open claim that closed 73% under reserve — a favorable signal, candidate for improved terms. The only change is a requested cyber sub-limit increase to $10M, which needs pricing. Recommend renewal with that single change.",
+    citations: ["Renewal_Questionnaire.pdf p.1", "Loss_Run.pdf p.2"],
+    broker: { name: "Diego Fernandes", agency: "AmWINS Brokerage", tenure: "Broker for 5 years · 44 bound policies", note: "Client wants to double the cyber sub-limit to $10M this term. Everything else stays the same." },
+    activity: [{ at: "08:55", who: "AI · Decision Core", what: "Recommended RENEW_WITH_CHANGES", ctx: "favorable — cyber sub-limit change only", conf: "91%" }],
+  },
+};
+
+export type Renewal = (typeof renewals)[number];
+
+function buildDefaultRenewal(r: Renewal): RenewalDetail {
+  const rec: RenewalRecommendation = r.flag === "Clean" ? "RENEW_AS_IS" : "RENEW_WITH_CHANGES";
+  return {
+    recommendation: rec,
+    confidence: 0.88,
+    processing: "ready",
+    priorSource: "PAS",
+    rulesVersion: "ACORD v3 · Combined v3",
+    rulesVersionAtBinding: "ACORD v3",
+    hardRulePassed: true,
+    appetite: [
+      { rule: "TIV under $250M", pass: true, hard: true, detail: "within limit" },
+      { rule: "Class code permitted", pass: true, hard: true, detail: "in appetite" },
+      { rule: "Loss ratio 5yr < 55%", pass: true, hard: false, detail: r.lossRatio },
+    ],
+    comparison: [
+      { label: "Named insured", prior: r.insured, current: r.insured },
+      { label: "Indicated premium", prior: r.priorPremium, current: r.indicated, change: r.change, direction: "unfavorable", strong: true },
+    ],
+    changeFlags: r.flag === "Clean" ? [] : [{ category: "exposure", label: r.flag, detail: "Flagged for review", direction: "unfavorable" }],
+    lossChanges: [{ type: "trend", description: `5yr loss ratio ${r.lossRatio}`, direction: "neutral" }],
+    timing: { daysToExpiration: 45, lapseRisk: false, noSubmission: false },
+    changes: rec === "RENEW_WITH_CHANGES" ? [{ item: r.flag, reason: "Change noted on the renewal submission" }] : [],
+    narrative: `${r.insured} renews at an indicated ${r.change}. ${r.flag === "Clean" ? "No material changes — recommend renewing as-is." : `Change noted: ${r.flag}. Recommend renewal with changes.`}`,
+    citations: ["Renewal_Questionnaire.pdf p.1"],
+    broker: { name: "Broker", agency: "—", tenure: "—", note: "" },
+    activity: [{ at: "09:00", who: "AI · Decision Core", what: `Recommended ${rec}`, ctx: r.insured, conf: "88%" }],
+  };
+}
+
+export function getRenewalDetail(r: Renewal): RenewalDetail {
+  return explicitRenewals[r.id] ?? buildDefaultRenewal(r);
+}
