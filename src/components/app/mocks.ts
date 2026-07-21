@@ -709,3 +709,237 @@ function buildDefaultRenewal(r: Renewal): RenewalDetail {
 export function getRenewalDetail(r: Renewal): RenewalDetail {
   return explicitRenewals[r.id] ?? buildDefaultRenewal(r);
 }
+
+/* ============================================================
+   Broker Communication — PRD-aligned draft model.
+   No new extraction: every draft is generated FROM a Submission
+   Triage or Renewal Management decision record. Mock data only,
+   shaped like the Broker Communication PRD's §7.1.
+   ============================================================ */
+
+export type CommType =
+  | "MISSING_INFO_REQUEST"
+  | "CONSISTENCY_FLAG_FOLLOWUP"
+  | "QUOTE_SUMMARY"
+  | "RENEWAL_TERMS_EXPLANATION"
+  | "NON_RENEWAL_NOTICE"
+  | "NO_RESPONSE_FOLLOWUP";
+
+export const COMM_TYPE_LABEL: Record<CommType, string> = {
+  MISSING_INFO_REQUEST: "Missing-info request",
+  CONSISTENCY_FLAG_FOLLOWUP: "Consistency-flag follow-up",
+  QUOTE_SUMMARY: "Quote summary",
+  RENEWAL_TERMS_EXPLANATION: "Renewal-terms explanation",
+  NON_RENEWAL_NOTICE: "Non-renewal notice",
+  NO_RESPONSE_FOLLOWUP: "No-response follow-up",
+};
+
+export type CommStatus = "DRAFT" | "UNDER_COMPLIANCE_REVIEW" | "APPROVED" | "SENT" | "DISCARDED";
+export type VolumeTier = "low" | "moderate" | "high" | "strategic";
+
+export type BrokerContext = {
+  name: string;
+  agency: string;
+  email: string;
+  tenureYears: number | null; // null => unknown → neutral default tone
+  volumeTier: VolumeTier | null;
+};
+
+export type CommDraft = {
+  id: string;
+  type: CommType;
+  sourceWorkflow: "Submission Triage" | "Renewal Management";
+  sourceId: string;
+  sourceRoute: string;
+  namedInsured: string;
+  broker: BrokerContext;
+  subject: string;
+  tone: string;
+  toneWhy: string; // why this tone (type + relationship)
+  sensitive: boolean;
+  requiresComplianceReview: boolean;
+  combined?: string; // note if it merges >1 trigger (FR-5)
+  deadlineRef?: string; // for follow-ups (anchor urgency to a real date)
+  citations: { claim: string; source: string }[];
+  body: string;
+  status: CommStatus;
+  generatedAt: string;
+};
+
+export const communicationQueue: CommDraft[] = [
+  {
+    id: "DRF-3011",
+    type: "MISSING_INFO_REQUEST",
+    sourceWorkflow: "Submission Triage",
+    sourceId: "SUB-24018",
+    sourceRoute: "/app/workflows/submission-triage",
+    namedInsured: "Ridgeline Contractors, Inc.",
+    broker: { name: "Michael Chen", agency: "Amwins Access", email: "michael.chen@amwins.com", tenureYears: 3, volumeTier: "moderate" },
+    subject: "Ridgeline Contractors — a couple of items to complete our review",
+    tone: "Collaborative",
+    toneWhy: "Routine request · 3-year moderate-volume relationship → warm but efficient",
+    sensitive: false,
+    requiresComplianceReview: false,
+    combined: "Missing info + loss-run depth flag",
+    citations: [
+      { claim: "Current SOV required", source: "Appetite rule · ACORD v3" },
+      { claim: "5-year loss run required", source: "Loss_Run_Ridgeline.pdf" },
+    ],
+    body: `Hi Michael,
+
+Thanks for the submission on Ridgeline Contractors. To finish our review we just need a couple of items:
+
+1. A current Statement of Values (SOV) — we didn't see one attached.
+2. The full 5-year loss run — the run we have covers 2024–2025, and we want to make sure we have the complete picture.
+
+As soon as those come through we can turn terms around quickly. Happy to hop on a call if that's easier.
+
+Best,
+Priya`,
+    status: "DRAFT",
+    generatedAt: "Today · 08:53",
+  },
+  {
+    id: "DRF-3012",
+    type: "CONSISTENCY_FLAG_FOLLOWUP",
+    sourceWorkflow: "Submission Triage",
+    sourceId: "SUB-24019",
+    sourceRoute: "/app/workflows/submission-triage",
+    namedInsured: "Palmetto Cold Storage LLC",
+    broker: { name: "Ana Ruiz", agency: "Marsh Southeast", email: "ana.ruiz@marsh.com", tenureYears: 4, volumeTier: "strategic" },
+    subject: "Palmetto Cold Storage — quick check on the sprinkler figures",
+    tone: "Careful",
+    toneWhy: "Sensitive category · strategic relationship → neutral framing, offer a call (TN-07)",
+    sensitive: true,
+    requiresComplianceReview: false,
+    citations: [
+      { claim: "SOV lists 92% sprinklered", source: "Palmetto_SOV_2026.xlsx" },
+      { claim: "Prior inspection noted 88%", source: "Inspection report 2025" },
+    ],
+    body: `Hi Ana,
+
+Quick one on Palmetto — we want to make sure we have a complete picture before we finalize. The SOV lists sprinklered TIV at 92%, and the prior inspection on file noted 88%. Could you help us confirm the current figure, especially for the two new Jacksonville locations?
+
+No concern at all — just want the file to line up. Happy to jump on a quick call if that's easier than email.
+
+Best,
+Priya`,
+    status: "DRAFT",
+    generatedAt: "Today · 09:44",
+  },
+  {
+    id: "DRF-3013",
+    type: "QUOTE_SUMMARY",
+    sourceWorkflow: "Submission Triage",
+    sourceId: "SUB-24012",
+    sourceRoute: "/app/workflows/submission-triage",
+    namedInsured: "Copperline Data Center Ops",
+    broker: { name: "Diego Fernandes", agency: "AmWINS Brokerage", email: "diego.f@amwins.com", tenureYears: 5, volumeTier: "high" },
+    subject: "Copperline Data Center — indicated terms",
+    tone: "Positive",
+    toneWhy: "Good news · lead with outcome, terms as a scannable list, no internal risk detail (TN-15)",
+    sensitive: false,
+    requiresComplianceReview: false,
+    citations: [{ claim: "Indicated premium $612,300", source: "Quote · SUB-24012" }],
+    body: `Hi Diego,
+
+Good news on Copperline Data Center — we're able to offer terms. Summary:
+
+• Premium: $612,300
+• Property + Cyber, TIV $134.9M
+• Effective: 02/28/2026
+• Cyber sub-limit: $5M (increase options available)
+
+Full proposal attached. Let me know if you'd like to walk through anything.
+
+Best,
+Priya`,
+    status: "DRAFT",
+    generatedAt: "Today · 09:20",
+  },
+  {
+    id: "DRF-3014",
+    type: "RENEWAL_TERMS_EXPLANATION",
+    sourceWorkflow: "Renewal Management",
+    sourceId: "REN-24-4102",
+    sourceRoute: "/app/workflows/renewal-management",
+    namedInsured: "Palmetto Cold Storage LLC",
+    broker: { name: "Ana Ruiz", agency: "Marsh Southeast", email: "ana.ruiz@marsh.com", tenureYears: 4, volumeTier: "strategic" },
+    subject: "Palmetto Cold Storage — renewal terms",
+    tone: "Warm",
+    toneWhy: "Growth-driven changes → frame as good news requiring coordination, group changes coherently (TN-12/14)",
+    sensitive: false,
+    requiresComplianceReview: false,
+    citations: [
+      { claim: "Revenue +11.7%, payroll +14.3%", source: "Financials FY24 · ACORD 125" },
+      { claim: "Indicated +10.9%", source: "Renewal quote" },
+    ],
+    body: `Hi Ana,
+
+Great to see Palmetto growing — two new refrigerated locations and revenue up ~12% since last term. That growth is the main driver of the renewal, so a few things to coordinate rather than anything to worry about:
+
+• Indicated premium: $187,400 (+10.9%), reflecting the added exposure
+• $500k spoilage sub-limit, as requested
+• Refreshed sprinkler certification for the new locations
+
+Loss experience remains strong. Full terms attached — happy to talk it through.
+
+Best,
+Priya`,
+    status: "DRAFT",
+    generatedAt: "Today · 08:42",
+  },
+  {
+    id: "DRF-3015",
+    type: "NON_RENEWAL_NOTICE",
+    sourceWorkflow: "Renewal Management",
+    sourceId: "REN-24-4099",
+    sourceRoute: "/app/workflows/renewal-management",
+    namedInsured: "Ridgeline Contractors, Inc.",
+    broker: { name: "Michael Chen", agency: "Amwins Access", email: "michael.chen@amwins.com", tenureYears: 3, volumeTier: "moderate" },
+    subject: "Ridgeline Contractors — renewal",
+    tone: "Considerate",
+    toneWhy: "Appetite-drift non-renewal → lead with notice & help, state it's not a reflection of the account, no loss figures (TN-08/09/10)",
+    sensitive: true,
+    requiresComplianceReview: true,
+    citations: [{ claim: "Class excluded under current appetite", source: "Rules Console · ACORD v3" }],
+    body: `Hi Michael,
+
+I wanted to give you as much notice as possible on the Ridgeline Contractors renewal. After our review, we won't be able to offer renewal terms this term.
+
+I want to be clear this isn't a reflection of Ridgeline — our underwriting appetite for this class has changed since the policy was originally bound. The account itself is in good standing with us.
+
+We'd be glad to help with the transition and to look at the rest of what you're placing. Happy to talk this through by phone whenever works.
+
+Best,
+Priya`,
+    status: "UNDER_COMPLIANCE_REVIEW",
+    generatedAt: "Today · 09:12",
+  },
+  {
+    id: "DRF-3016",
+    type: "NO_RESPONSE_FOLLOWUP",
+    sourceWorkflow: "Renewal Management",
+    sourceId: "REN-24-4101",
+    sourceRoute: "/app/workflows/renewal-management",
+    namedInsured: "Highline Hospitality Group",
+    broker: { name: "Jordan Blake", agency: "RT Specialty", email: "jordan.blake@rtspecialty.com", tenureYears: 2, volumeTier: "moderate" },
+    subject: "Re: Highline Hospitality — renewal (following up)",
+    tone: "Gentle",
+    toneWhy: "No reply in 7 business days → assume good faith, anchor to the real deadline, one follow-up only (TN-16/17)",
+    sensitive: false,
+    requiresComplianceReview: false,
+    deadlineRef: "Policy expires Feb 20, 2026",
+    citations: [{ claim: "Renewal terms sent Jan 9", source: "Thread history" }],
+    body: `Hi Jordan,
+
+Just circling back on the Highline Hospitality renewal — wanted to make sure our terms didn't get lost in the shuffle. With the policy expiring Feb 20, we'd love to get this wrapped up in good time so there's no gap for the insured.
+
+Anything you need from us to move it forward? Happy to help.
+
+Best,
+Priya`,
+    status: "DRAFT",
+    generatedAt: "Today · 10:05",
+  },
+];

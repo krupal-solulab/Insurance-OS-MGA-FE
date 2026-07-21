@@ -1,7 +1,6 @@
 import type React from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
-  BrokerCopilot,
   Endorsements,
   Quoting,
   BindOrder,
@@ -12,6 +11,7 @@ import {
 } from "@/components/app/Workflows";
 import { SubmissionTriage } from "@/components/app/SubmissionTriage";
 import { RenewalManagement } from "@/components/app/RenewalManagement";
+import { BrokerCopilot } from "@/components/app/BrokerCopilot";
 import { RulesConsole } from "@/components/app/RulesConsole";
 
 const map: Record<string, React.ComponentType> = {
