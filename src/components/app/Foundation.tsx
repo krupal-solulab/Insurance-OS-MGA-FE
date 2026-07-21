@@ -56,6 +56,7 @@ export function ExtractionCore() {
             <MiniStat label="Field-level confidence ≥ 95%" value="94.2%" />
             <MiniStat label="Human corrections applied" value="1.8% of fields" />
           </div>
+          <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Illustrative</div>
         </Panel>
 
         <Panel title="Capabilities">
@@ -76,8 +77,17 @@ export function ExtractionCore() {
       <div className="mt-5">
         <Panel title="Reused by">
           <div className="flex flex-wrap gap-2">
-            {["Submission Triage", "Renewal Management", "Broker Copilot", "Endorsement Processing", "Quoting", "Bind Order", "Bordereau", "Claims Intake"].map((w) => (
-              <span key={w} className="rounded-full border border-border bg-secondary px-3 py-1 text-xs">{w}</span>
+            {[
+              ["Submission Triage", "submission-triage"],
+              ["Renewal Management", "renewal-management"],
+              ["Broker Copilot", "broker-copilot"],
+              ["Endorsement Processing", "endorsements"],
+              ["Quoting", "quoting"],
+              ["Bind Order", "bind"],
+              ["Bordereau", "bordereau"],
+              ["Claims Intake", "claims"],
+            ].map(([w, slug]) => (
+              <Link key={w} to={`/app/workflows/${slug}` as any} className="rounded-full border border-border bg-secondary px-3 py-1 text-xs transition hover:border-foreground/40 hover:text-accent">{w}</Link>
             ))}
           </div>
         </Panel>
@@ -131,7 +141,7 @@ export function DecisionCore() {
             ].map((r) => (
               <li key={r.rule} className="flex items-center gap-3 py-3 text-sm">
                 <div className="flex-1"><div className="font-medium">{r.rule}</div><div className="text-[11px] text-muted-foreground">{r.eval} evaluations · {r.version}</div></div>
-                <button className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-secondary">Edit</button>
+                <Link to="/app/workflows/rules-console" className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-secondary">Edit</Link>
               </li>
             ))}
           </ul>
