@@ -712,6 +712,15 @@ const tiers: Tier[] = [
           "A carrier-ready bordereau is drafted for filing.",
         ],
       },
+      {
+        id: "claims-intake",
+        title: "Claims Intake",
+        steps: [
+          "An FNOL arrives by email from the broker or insured.",
+          "Details are extracted, severity is predicted, and a reserve is suggested.",
+          "The claim is routed to the right carrier and TPA for handling.",
+        ],
+      },
     ],
   },
 ];
@@ -1187,7 +1196,7 @@ function Footer() {
           <div className="label-eyebrow mb-4">Company</div>
           <ul className="space-y-2 text-sm">
             <li>
-              <a href="#about" className="hover:text-accent">
+              <a href="#why" className="hover:text-accent">
                 About
               </a>
             </li>
