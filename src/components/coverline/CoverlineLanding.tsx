@@ -14,6 +14,8 @@ import {
   Users,
   Database,
   Sparkles,
+  Send,
+  Image as ImageIcon,
 } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion, useScroll, useMotionValueEvent } from "motion/react";
 import {
@@ -182,6 +184,163 @@ function Nav() {
   );
 }
 
+const HERO_EASE = [0.22, 1, 0.36, 1] as const;
+
+function Gauge({ value }: { value: number }) {
+  const reduce = useReducedMotion();
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const off = c * (1 - value / 100);
+  return (
+    <div className="relative mx-auto my-1 h-24 w-24">
+      <svg viewBox="0 0 80 80" className="h-24 w-24 -rotate-90">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="currentColor" className="text-background/20" strokeWidth="7" />
+        <motion.circle
+          cx="40"
+          cy="40"
+          r={r}
+          fill="none"
+          stroke="var(--color-success)"
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          initial={reduce ? { strokeDashoffset: off } : { strokeDashoffset: c }}
+          whileInView={{ strokeDashoffset: off }}
+          viewport={{ once: true }}
+          transition={{ duration: 1.1, ease: HERO_EASE, delay: 0.4 }}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center">
+        <div className="text-center">
+          <div className="font-serif text-2xl leading-none">{value}%</div>
+          <div className="text-[9px] uppercase tracking-wider text-background/60">High match</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const heroFiles: { name: string; icon: any; tint: string }[] = [
+  { name: "Submission.pdf", icon: FileText, tint: "text-destructive" },
+  { name: "Loss Runs.docx", icon: FileText, tint: "text-accent" },
+  { name: "Exposure.xlsx", icon: Table2, tint: "text-success" },
+  { name: "Inspection.jpg", icon: ImageIcon, tint: "text-ink-soft" },
+];
+
+/** Layered product-mockup collage for the hero (desktop only). Illustrative UI. */
+function HeroVisual() {
+  const reduce = useReducedMotion();
+  const rise = (delay: number) => ({
+    initial: reduce ? false : { opacity: 0, y: 22 },
+    whileInView: reduce ? undefined : { opacity: 1, y: 0 },
+    viewport: { once: true, margin: "-40px" },
+    transition: { duration: 0.6, ease: HERO_EASE, delay },
+  });
+  const float = (delay: number) =>
+    reduce ? {} : { animate: { y: [0, -7, 0] }, transition: { duration: 6.5, repeat: Infinity, ease: "easeInOut", delay } };
+
+  return (
+    <div className="relative mx-auto h-[560px] w-full max-w-[600px]">
+      <div aria-hidden className="absolute right-4 top-16 h-72 w-72 rounded-full bg-accent/5 blur-3xl" />
+
+      {/* Main — Submission Overview */}
+      <motion.div
+        {...rise(0.1)}
+        className="absolute left-0 top-10 z-10 w-[76%] rounded-2xl border border-border bg-card p-4 shadow-[0_34px_70px_-34px_var(--color-ink)]"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground font-serif text-xs text-background">C.</span>
+            <span className="text-sm font-medium">Submission Overview</span>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
+            <Check className="h-3 w-3" /> AI analysis complete
+          </span>
+        </div>
+        <dl className="mt-4 space-y-2 text-[12px]">
+          {[
+            ["Line of business", "Property + GL"],
+            ["Insured", "Palmetto Cold Storage"],
+            ["TIV", "$42.8M · 14 locations"],
+            ["Premium indication", "$187,400"],
+          ].map(([k, v]) => (
+            <div key={k} className="flex items-center justify-between gap-4">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="font-medium text-foreground">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 rounded-xl border border-success/30 bg-success/5 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Sparkles className="h-3 w-3 text-accent" /> Recommendation
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="rounded-md bg-success/15 px-2 py-0.5 text-xs font-semibold text-success">Proceed</span>
+            <span className="text-xs text-ink-soft">Within appetite</span>
+          </div>
+          <ul className="mt-2.5 space-y-1.5 text-[11px] text-ink-soft">
+            {["Sprinklered 92% — within appetite", "5-yr loss ratio 38% — clear", "TIV within $250M authority"].map((li) => (
+              <li key={li} className="flex items-center gap-1.5">
+                <Check className="h-3 w-3 shrink-0 text-success" /> {li}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2.5 flex items-center justify-between border-t border-success/20 pt-2 text-[11px]">
+            <span className="text-muted-foreground">Confidence score</span>
+            <span className="font-mono font-semibold text-success">94%</span>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Appetite Match gauge — dark, top-right */}
+      <motion.div {...rise(0.35)} className="absolute right-0 top-0 z-20 w-[40%]">
+        <motion.div {...float(0.6)} className="rounded-2xl border border-border bg-foreground p-4 text-background shadow-[0_28px_56px_-30px_var(--color-ink)]">
+          <div className="text-[11px] font-medium text-background/70">Appetite match</div>
+          <Gauge value={92} />
+          <div className="mt-1 text-center text-[9.5px] leading-tight text-background/55">Within underwriting appetite &amp; guidelines</div>
+        </motion.div>
+      </motion.div>
+
+      {/* Broker Communication draft — bottom-right */}
+      <motion.div {...rise(0.5)} className="absolute bottom-12 right-0 z-20 w-[54%]">
+        <motion.div {...float(1.4)} className="rounded-2xl border border-border bg-card p-4 shadow-[0_28px_56px_-30px_var(--color-ink)]">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Mail className="h-4 w-4 text-accent" /> Broker communication
+            <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">Draft</span>
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">
+            Hi Ana, thank you for the Palmetto renewal. Based on our review, we're pleased to offer terms as outlined.
+          </p>
+          <div className="mt-2 space-y-1.5">
+            <div className="h-1.5 w-3/4 rounded-full bg-secondary" />
+            <div className="h-1.5 w-1/2 rounded-full bg-secondary" />
+          </div>
+          <div className="mt-3 flex gap-2">
+            <span className="rounded-md border border-border px-3 py-1 text-xs">Edit</span>
+            <span className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
+              Send <Send className="h-3 w-3" />
+            </span>
+          </div>
+        </motion.div>
+      </motion.div>
+
+      {/* Document tiles — bottom-left */}
+      <motion.div {...rise(0.65)} className="absolute bottom-0 left-1 z-10 flex gap-2">
+        {heroFiles.map((f) => (
+          <div key={f.name} className="w-[74px] rounded-xl border border-border bg-card p-2.5 text-center shadow-[0_16px_32px_-24px_var(--color-ink)]">
+            <f.icon className={`mx-auto h-5 w-5 ${f.tint}`} />
+            <div className="mt-1.5 truncate text-[8.5px] text-muted-foreground">{f.name}</div>
+          </div>
+        ))}
+      </motion.div>
+
+      <div className="absolute -bottom-1 right-1 z-30">
+        <Illustrative>Illustrative UI</Illustrative>
+      </div>
+    </div>
+  );
+}
+
 function Hero() {
   const reduce = useReducedMotion();
   const openDemo = useOpenDemo();
@@ -193,6 +352,8 @@ function Hero() {
         className="bg-grid pointer-events-none absolute inset-0 opacity-[0.5] [mask-image:radial-gradient(120%_80%_at_15%_0%,black,transparent_70%)]"
       />
       <div className="relative z-10 mx-auto max-w-7xl px-5 pb-20 pt-16 md:px-8 md:pb-28 md:pt-24">
+        <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] lg:gap-8">
+          <div>
         <motion.div
           initial={reduce ? false : { opacity: 0, y: 10 }}
           animate={reduce ? undefined : { opacity: 1, y: 0 }}
@@ -201,7 +362,7 @@ function Hero() {
           <Eyebrow num="00 /">Built for MGAs</Eyebrow>
         </motion.div>
 
-        <h1 className="mt-6 max-w-4xl font-serif text-[2.5rem] leading-[1.05] tracking-[-0.02em] text-foreground md:text-[4.25rem]">
+        <h1 className="mt-6 font-serif text-[2.5rem] leading-[1.05] tracking-[-0.02em] text-foreground md:text-[3.75rem] xl:text-[4.25rem]">
           <RevealLines
             lines={[
               "The AI operating system",
@@ -233,6 +394,13 @@ function Hero() {
             <span className="h-px w-6 bg-foreground transition-all group-hover:w-10" />
           </a>
         </Reveal>
+          </div>
+
+          {/* Product-mockup collage — desktop only */}
+          <div className="relative hidden lg:block">
+            <HeroVisual />
+          </div>
+        </div>
 
         {/* Trust bar */}
         <RevealGroup className="mt-16 grid gap-6 rule-t rule-b py-5 text-sm text-ink-soft md:grid-cols-3 md:divide-x md:divide-border md:gap-0" stagger={0.1}>
@@ -767,7 +935,9 @@ function WorkflowCard({
     : "text-muted-foreground group-hover:text-accent";
 
   return (
-    <div className={`group h-full transition-all duration-300 hover:-translate-y-1 ${cardCls}`}>
+    <div
+      className={`group relative self-start transition-all duration-300 hover:-translate-y-1 ${open ? "-translate-y-1 ring-1 ring-accent/40" : ""} ${cardCls}`}
+    >
       <button
         type="button"
         onClick={onToggle}
@@ -776,9 +946,13 @@ function WorkflowCard({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="font-serif text-xl tracking-[-0.01em]">{item.title}</div>
-          <ChevronDown
-            className={`mt-1 h-4 w-4 shrink-0 transition-transform duration-200 ${affordanceCls} ${open ? "rotate-180" : ""}`}
-          />
+          <span
+            className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border transition-all duration-300 ${
+              open ? "border-accent/40 bg-accent/10" : "border-transparent group-hover:border-current/20"
+            } ${affordanceCls}`}
+          >
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
+          </span>
         </div>
         {item.desc && (
           <p className={`mt-3 text-sm leading-relaxed ${dark ? "text-background/75" : "text-ink-soft"}`}>
@@ -798,12 +972,17 @@ function WorkflowCard({
             initial={reduce ? { opacity: 1 } : { height: 0, opacity: 0 }}
             animate={reduce ? { opacity: 1 } : { height: "auto", opacity: 1 }}
             exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: 0.32, ease: EASE }}
+            transition={{ height: { duration: 0.4, ease: EASE }, opacity: { duration: 0.28, ease: "easeOut" } }}
             className="overflow-hidden"
           >
             <div className={`mx-6 border-t pb-6 pt-4 ${dividerCls}`}>
               {statusLabel && (
-                <div className="mb-3">
+                <motion.div
+                  className="mb-3"
+                  initial={reduce ? false : { opacity: 0, y: 4 }}
+                  animate={reduce ? undefined : { opacity: 1, y: 0 }}
+                  transition={{ delay: 0.08, duration: 0.3 }}
+                >
                   <span
                     className={`inline-flex items-center gap-1.5 rounded-none border px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.12em] ${
                       dark ? "border-background/30 text-background/70" : "border-border text-muted-foreground"
@@ -812,18 +991,22 @@ function WorkflowCard({
                     <span className="inline-block h-1 w-1 rounded-full bg-accent" />
                     {statusLabel} · illustrative flow
                   </span>
-                </div>
+                </motion.div>
               )}
               <ol className="space-y-2.5">
                 {item.steps.map((s, i) => (
-                  <li key={i} className="flex items-start gap-3 text-[13px] leading-relaxed">
-                    <span
-                      className={`mt-px grid h-5 w-5 shrink-0 place-items-center border font-mono text-[10px] ${numCls}`}
-                    >
+                  <motion.li
+                    key={i}
+                    className="flex items-start gap-3 text-[13px] leading-relaxed"
+                    initial={reduce ? false : { opacity: 0, x: -6 }}
+                    animate={reduce ? undefined : { opacity: 1, x: 0 }}
+                    transition={{ delay: 0.12 + i * 0.07, duration: 0.32, ease: EASE }}
+                  >
+                    <span className={`mt-px grid h-5 w-5 shrink-0 place-items-center border font-mono text-[10px] ${numCls}`}>
                       {i + 1}
                     </span>
                     <span className={stepText}>{s}</span>
-                  </li>
+                  </motion.li>
                 ))}
               </ol>
             </div>
@@ -872,7 +1055,7 @@ function Workflows() {
               </div>
               <RevealGroup className="grid items-start gap-4 md:grid-cols-3" stagger={0.08}>
                 {tier.items.map((item) => (
-                  <RevealChild key={item.id} className="h-full">
+                  <RevealChild key={item.id}>
                     <WorkflowCard
                       item={item}
                       tone={tier.tone}
