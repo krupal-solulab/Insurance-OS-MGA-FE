@@ -766,6 +766,154 @@ export type CommDraft = {
   generatedAt: string;
 };
 
+/* ============================================================
+   Bordereau Reporting — PRD-aligned model.
+   Draws on transactions already produced by Triage/Renewal.
+   Mock data only, shaped like the Bordereau PRD §7.
+   Backend seam: replace `bordereaux` with compiled output from
+   the carrier profile + transaction universe.
+   ============================================================ */
+
+export type BdxType = "PREMIUM" | "CLAIMS";
+export type CheckStatus =
+  | "COMPLETE" | "GAP_DETECTED"
+  | "COMPLIANT" | "NON_COMPLIANT"
+  | "MATCHED" | "DISCREPANCY"
+  | "CURRENT" | "STALE"
+  | "NOT_APPLICABLE";
+
+export type BdxCheck = { status: CheckStatus; issues: string[] };
+export type BordereauRow = { cells: string[]; source: string; flagged?: boolean };
+export type RequirementProfile = {
+  classCodeSystem: string;
+  dateFormat: string;
+  frequency: "monthly" | "quarterly";
+  dueRule: string;
+  statementAvailable: boolean;
+  compilationDays: number;
+  columns: string[];
+};
+export type BordereauChecks = { completeness: BdxCheck; format: BdxCheck; reconciliation: BdxCheck; dataCurrency: BdxCheck };
+
+export type Bordereau = {
+  id: string;
+  carrierName: string;
+  type: BdxType;
+  period: string;
+  dueDate: string;
+  daysToDue: number;
+  headline: string;
+  profile: RequirementProfile;
+  rows: BordereauRow[];
+  checks: BordereauChecks;
+  amendments: { at: string; note: string }[];
+  filedHistory: { period: string; status: string }[];
+  activity: ActivityEntry[];
+};
+
+export const bordereaux: Bordereau[] = [
+  {
+    id: "BDX-A-PREM-2601",
+    carrierName: "Carrier A",
+    type: "PREMIUM",
+    period: "January 2026",
+    dueDate: "Jan 15, 2026",
+    daysToDue: 3,
+    headline: "214 policies · $4.86M written premium · $612k commission",
+    profile: { classCodeSystem: "ISO GL/Property", dateFormat: "MM/DD/YY", frequency: "monthly", dueRule: "15 days after period end", statementAvailable: true, compilationDays: 3, columns: ["Policy #", "Insured", "Effective", "Written prem.", "Earned prem.", "Commission"] },
+    rows: [
+      { cells: ["COV-24-P-00812", "Palmetto Cold Storage", "02/12/26", "$187,400", "$15,617", "$28,110"], source: "Bound · SUB-24019" },
+      { cells: ["COV-24-P-00776", "Highline Hospitality", "02/20/26", "$421,000", "$35,083", "$63,150"], source: "Bound · SUB-24016" },
+      { cells: ["COV-24-P-00758", "Cedar Grove Living", "03/10/26", "$118,400", "$9,867", "$17,760"], source: "Renewed · REN-24-4100" },
+      { cells: ["COV-24-P-00722", "Copperline Data Ctr", "02/28/26", "$612,300", "$51,025", "$91,845"], source: "Bound · SUB-24012", flagged: true },
+      { cells: ["COV-24-P-00701", "Bayou Marine Svcs", "01/30/26", "$312,900", "$26,075", "$46,935"], source: "Bound · SUB-24017" },
+    ],
+    checks: {
+      completeness: { status: "GAP_DETECTED", issues: ["1 bound policy missing: COV-24-P-00741 · Ridgeline Contractors (endorsement bound mid-period, not in extract)"] },
+      format: { status: "COMPLIANT", issues: [] },
+      reconciliation: { status: "MATCHED", issues: [] },
+      dataCurrency: { status: "NOT_APPLICABLE", issues: [] },
+    },
+    amendments: [],
+    filedHistory: [{ period: "Dec 2025", status: "Filed" }, { period: "Nov 2025", status: "Filed" }, { period: "Oct 2025", status: "Filed" }],
+    activity: [{ at: "07:00", who: "AI · Compilation", what: "Compiled 213 of 214 transactions", ctx: "completeness gap detected", conf: "—" }],
+  },
+  {
+    id: "BDX-A-CLM-25Q4",
+    carrierName: "Carrier A",
+    type: "CLAIMS",
+    period: "Q4 2025",
+    dueDate: "Jan 31, 2026",
+    daysToDue: 19,
+    headline: "42 claims · $1.24M incurred · $0.98M paid",
+    profile: { classCodeSystem: "ISO cause-of-loss", dateFormat: "MM/DD/YY", frequency: "quarterly", dueRule: "30 days after quarter end", statementAvailable: false, compilationDays: 2, columns: ["Claim #", "Insured", "Date of loss", "Status", "Incurred", "Paid"] },
+    rows: [
+      { cells: ["CLM-33210", "Palmetto Cold Storage", "12/02/25", "Open", "$85,000", "$0"], source: "FNOL · CLM-33210", flagged: true },
+      { cells: ["CLM-33207", "Ironclad Salvage", "11/18/25", "Open", "$412,000", "$120,000"], source: "FNOL · CLM-33207" },
+      { cells: ["CLM-33188", "Highline Hospitality", "10/30/25", "Closed", "$18,000", "$18,000"], source: "FNOL · CLM-33188" },
+      { cells: ["CLM-33172", "Cedar Grove Living", "10/05/25", "Closed", "$9,400", "$9,400"], source: "FNOL · CLM-33172" },
+    ],
+    checks: {
+      completeness: { status: "COMPLETE", issues: [] },
+      format: { status: "COMPLIANT", issues: [] },
+      reconciliation: { status: "NOT_APPLICABLE", issues: [] },
+      dataCurrency: { status: "STALE", issues: ["CLM-33210 reserve last refreshed 6 days ago — refresh against the claims system before submission (BR-06)"] },
+    },
+    amendments: [],
+    filedHistory: [{ period: "Q3 2025", status: "Filed" }, { period: "Q2 2025", status: "Filed" }],
+    activity: [{ at: "07:00", who: "AI · Compilation", what: "Compiled 42 claims", ctx: "1 stale reserve detected", conf: "—" }],
+  },
+  {
+    id: "BDX-LL-COMB-2601",
+    carrierName: "Lloyd's Syndicate 2001",
+    type: "PREMIUM",
+    period: "January 2026",
+    dueDate: "Feb 05, 2026",
+    daysToDue: 24,
+    headline: "96 policies · combined premium bordereau",
+    profile: { classCodeSystem: "Lloyd's risk codes", dateFormat: "DD/MM/YYYY", frequency: "monthly", dueRule: "5th of following month", statementAvailable: true, compilationDays: 4, columns: ["Policy #", "Insured", "Effective", "Written prem.", "Earned prem.", "Commission"] },
+    rows: [
+      { cells: ["COV-24-L-00312", "Meridian Logistics", "12/01/2025", "£142,000", "£23,600", "£21,300"], source: "Bound · SUB-24001" },
+      { cells: ["COV-24-L-00298", "Atlas Freight Co", "01/05/2026", "£98,500", "£8,200", "£14,775"], source: "Bound · SUB-23988" },
+      { cells: ["COV-24-L-00276", "Northgate Marine", "12/20/2025", "£210,400", "£28,000", "£31,560"], source: "Bound · SUB-23971" },
+    ],
+    checks: {
+      completeness: { status: "COMPLETE", issues: [] },
+      format: { status: "NON_COMPLIANT", issues: ["Class code system not mapped: ISO codes used, Lloyd's risk codes required — apply crosswalk (BR-03)", "Date format MM/DD/YY — carrier requires DD/MM/YYYY"] },
+      reconciliation: { status: "DISCREPANCY", issues: ["Carrier statement total £451,900 vs compiled £450,900 — £1,000 variance to investigate (BR-04, symmetric — do not auto-resolve)"] },
+      dataCurrency: { status: "NOT_APPLICABLE", issues: [] },
+    },
+    amendments: [],
+    filedHistory: [{ period: "Dec 2025", status: "Filed" }],
+    activity: [{ at: "07:00", who: "AI · Compilation", what: "Compiled 96 policies", ctx: "format + reconciliation issues detected", conf: "—" }],
+  },
+  {
+    id: "BDX-B-PREM-2601",
+    carrierName: "Carrier B",
+    type: "PREMIUM",
+    period: "January 2026",
+    dueDate: "Jan 20, 2026",
+    daysToDue: 8,
+    headline: "168 policies · $3.71M written premium · $556k commission",
+    profile: { classCodeSystem: "NAICS", dateFormat: "MM/DD/YYYY", frequency: "monthly", dueRule: "20 days after period end", statementAvailable: false, compilationDays: 2, columns: ["Policy #", "Insured", "Effective", "Written prem.", "Earned prem.", "Commission"] },
+    rows: [
+      { cells: ["COV-24-B-01120", "Summit Manufacturing", "01/10/26", "$96,800", "$8,067", "$14,520"], source: "Bound · SUB-24003" },
+      { cells: ["COV-24-B-01098", "Harbor Point Realty", "01/15/26", "$142,300", "$11,858", "$21,345"], source: "Renewed · REN-24-4088" },
+      { cells: ["COV-24-B-01077", "Vertex Health Systems", "01/22/26", "$318,900", "$26,575", "$47,835"], source: "Bound · SUB-23996" },
+      { cells: ["COV-24-B-01055", "Blue Ridge Transport", "01/28/26", "$74,200", "$6,183", "$11,130"], source: "Bound · SUB-23990" },
+    ],
+    checks: {
+      completeness: { status: "COMPLETE", issues: [] },
+      format: { status: "COMPLIANT", issues: [] },
+      reconciliation: { status: "NOT_APPLICABLE", issues: [] },
+      dataCurrency: { status: "NOT_APPLICABLE", issues: [] },
+    },
+    amendments: [],
+    filedHistory: [{ period: "Dec 2025", status: "Filed" }, { period: "Nov 2025", status: "Filed" }],
+    activity: [{ at: "07:00", who: "AI · Compilation", what: "Compiled 168 transactions — all checks pass", ctx: "ready for review", conf: "—" }],
+  },
+];
+
 export const communicationQueue: CommDraft[] = [
   {
     id: "DRF-3011",

@@ -6,12 +6,12 @@ import {
   BindOrder,
   AppetiteGovernance,
   Portfolio,
-  Bordereau,
   Claims,
 } from "@/components/app/Workflows";
 import { SubmissionTriage } from "@/components/app/SubmissionTriage";
 import { RenewalManagement } from "@/components/app/RenewalManagement";
 import { BrokerCopilot } from "@/components/app/BrokerCopilot";
+import { BordereauReporting } from "@/components/app/BordereauReporting";
 import { RulesConsole } from "@/components/app/RulesConsole";
 
 const map: Record<string, React.ComponentType> = {
@@ -23,7 +23,7 @@ const map: Record<string, React.ComponentType> = {
   bind: BindOrder,
   appetite: AppetiteGovernance,
   portfolio: Portfolio,
-  bordereau: Bordereau,
+  bordereau: BordereauReporting,
   claims: Claims,
   "rules-console": RulesConsole,
 };
