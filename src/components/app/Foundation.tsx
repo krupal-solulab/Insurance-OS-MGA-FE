@@ -1,7 +1,9 @@
-import { Scan, Gavel, Sparkles, ShieldCheck, FileText, Layers, ArrowRight, CheckCircle2, Send, Download, Mail } from "lucide-react";
+import { Scan, Gavel, Sparkles, ShieldCheck, FileText, Layers, ArrowRight, ArrowUpRight, CheckCircle2, Send, Download, Mail, Trash2, Loader2 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { answer, type AssistantAnswer } from "./assistant";
 
 const extractionCaps = [
   { title: "Email ingestion", desc: "Submission mailboxes are read the moment they arrive.", metric: "12.4k / mo" },
@@ -143,67 +145,152 @@ export function DecisionCore() {
    AI Assistant · full-page copilot
    ============================================================ */
 
+type ChatMsg = { role: "user"; text: string } | ({ role: "ai" } & AssistantAnswer);
+
+const GREETING: ChatMsg = {
+  role: "ai",
+  blocks: ["Good morning Priya. You have 12 submissions awaiting review, 7 renewals due in the next 30 days, and 2 claims opened this morning. What would you like to work on?"],
+  citations: [],
+  actions: [],
+};
+
+const SUGGESTED = [
+  "Summarize submission SUB-24019",
+  "Explain the appetite decision on Ridgeline Contractors",
+  "Compare Palmetto renewal with prior year",
+  "Draft a broker email requesting missing SOV",
+  "Explain the pricing on Copperline Data Center",
+  "Recommend a deductible for Highline Hospitality",
+  "Identify missing documents on SUB-24017",
+  "Generate January premium bordereau for Carrier A",
+  "Summarize portfolio for the January exec review",
+];
+
 export function AssistantPage() {
-  const [msg, setMsg] = useState("");
-  const suggested = [
-    "Summarize submission SUB-24019",
-    "Explain the appetite decision on Ridgeline Contractors",
-    "Compare Palmetto renewal with prior year",
-    "Draft a broker email requesting missing SOV",
-    "Explain the pricing on Copperline Data Center",
-    "Recommend a deductible for Highline Hospitality",
-    "Identify missing documents on SUB-24017",
-    "Generate January premium bordereau for Carrier A",
-    "Summarize portfolio for the January exec review",
-  ];
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<ChatMsg[]>([GREETING]);
+  const [thinking, setThinking] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, thinking]);
+
+  function send(text: string) {
+    const q = text.trim();
+    if (!q || thinking) return;
+    setMessages((m) => [...m, { role: "user", text: q }]);
+    setInput("");
+    setThinking(true);
+    // Simulated latency — the seam a real LLM call replaces (see assistant.ts).
+    window.setTimeout(() => {
+      setMessages((m) => [...m, { role: "ai", ...answer(q) }]);
+      setThinking(false);
+    }, 650);
+  }
+
   return (
     <div className="mx-auto max-w-[1200px]">
       <PageHeader
         eyebrow="Global AI"
         title="Coverline AI Assistant"
-        description="One assistant with full context on your book — every submission, renewal, and decision cited to the source."
+        description="One assistant with full context on your book — every answer cited to source, and it hands off to the workflow for you to approve. It never acts on its own."
+        actions={
+          <button
+            onClick={() => setMessages([GREETING])}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground transition hover:bg-secondary"
+          >
+            <Trash2 className="h-4 w-4" /> Clear
+          </button>
+        }
       />
+
+      {/* Context strip */}
+      <div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border border-border bg-secondary/40 px-4 py-2.5 text-[12px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5 font-medium text-foreground"><Sparkles className="h-3.5 w-3.5 text-accent" /> Context</span>
+        <span><b className="text-foreground">12</b> submissions awaiting review</span>
+        <span><b className="text-foreground">7</b> renewals due in 30 days</span>
+        <span><b className="text-foreground">2</b> claims opened today</span>
+        <span className="ml-auto inline-flex items-center gap-1.5 text-[11px]"><Gavel className="h-3 w-3 text-accent" /> Extraction + Decision Core · cited</span>
+      </div>
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <Panel className="min-h-[520px]">
-          <div className="space-y-4 text-sm">
-            <div className="rounded-xl border border-border bg-secondary/40 p-4">
-              <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"><Sparkles className="h-3 w-3 text-accent" /> Coverline AI</div>
-              <p>Good morning Priya. You have 12 submissions awaiting review, 7 renewals due in the next 30 days, and 2 claims opened this morning. What would you like to work on?</p>
-            </div>
-            <div className="flex justify-end">
-              <div className="max-w-[75%] rounded-xl border border-accent/25 bg-accent/5 p-3">Summarize submission SUB-24019 and tell me what's missing.</div>
-            </div>
-            <div className="rounded-xl border border-border bg-secondary/40 p-4">
-              <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"><Sparkles className="h-3 w-3 text-accent" /> Coverline AI</div>
-              <p>
-                <b>SUB-24019 · Palmetto Cold Storage LLC</b> — FL warehousing risk brokered by Marsh Southeast. TIV
-                $42.8M across 14 locations, sprinklered 92%. Five-year loss ratio 38%. One open flood claim ($180k
-                reserve, within appetite). Risk score 82 · Decision Core recommends <b>Proceed</b> at $187,400 premium.
-              </p>
-              <p className="mt-2">Nothing critical is missing. Two optional items would help: a fresh sprinkler inspection for the two new Jacksonville locations, and continuous refrigeration monitoring certification.</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <button className="rounded-md border border-border bg-background px-2.5 py-1.5">Draft chase email</button>
-                <button className="rounded-md border border-border bg-background px-2.5 py-1.5">Open submission</button>
-                <button className="rounded-md border border-border bg-background px-2.5 py-1.5">Approve recommendation</button>
+        <Panel className="flex min-h-[560px] flex-col">
+          <div className="flex-1 space-y-4 overflow-y-auto text-sm">
+            {messages.map((m, i) =>
+              m.role === "user" ? (
+                <div key={i} className="flex justify-end">
+                  <div className="max-w-[78%] rounded-xl border border-accent/25 bg-accent/5 p-3">{m.text}</div>
+                </div>
+              ) : (
+                <div key={i} className="rounded-xl border border-border bg-secondary/40 p-4">
+                  <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                    <Sparkles className="h-3 w-3 text-accent" /> Coverline AI
+                  </div>
+                  {m.blocks.map((b, bi) => (
+                    <p key={bi} className={bi > 0 ? "mt-2" : ""}>{b}</p>
+                  ))}
+                  {m.actions.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      {m.actions.map((a) => (
+                        <Link key={a.label} to={a.to as any} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 hover:border-foreground/40">
+                          {a.label} <ArrowUpRight className="h-3 w-3" />
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                  {m.citations.length > 0 && (
+                    <div className="mt-3 text-[10px] text-muted-foreground">Cited: {m.citations.join(" · ")}</div>
+                  )}
+                </div>
+              ),
+            )}
+            {thinking && (
+              <div className="rounded-xl border border-border bg-secondary/40 p-4">
+                <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <Sparkles className="h-3 w-3 text-accent" /> Coverline AI
+                </div>
+                <div className="inline-flex items-center gap-2 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…</div>
               </div>
-              <div className="mt-3 text-[10px] text-muted-foreground">Cited: ACORD_125_Palmetto.pdf p.2 · Loss_Run_5yr.pdf p.4 · Palmetto_SOV_2026.xlsx</div>
-            </div>
+            )}
+            <div ref={endRef} />
           </div>
+
           <div className="mt-6 rounded-xl border border-border p-2">
-            <textarea rows={3} value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Ask about a submission, renewal, broker, or the portfolio…" className="w-full resize-none bg-transparent p-2 text-sm outline-none" />
+            <textarea
+              rows={3}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              placeholder="Ask about a submission, renewal, broker, or the portfolio…  (Enter to send)"
+              className="w-full resize-none bg-transparent p-2 text-sm outline-none"
+            />
             <div className="flex items-center gap-2 border-t border-border pt-2">
-              <button className="rounded-md p-1.5 hover:bg-secondary"><FileText className="h-4 w-4" /></button>
-              <button className="rounded-md p-1.5 hover:bg-secondary"><Layers className="h-4 w-4" /></button>
-              <div className="ml-auto"><button className="inline-flex items-center gap-2 rounded-md bg-foreground px-3 py-1.5 text-sm text-background">Send <Send className="h-3.5 w-3.5" /></button></div>
+              <button className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" title="Attach a document"><FileText className="h-4 w-4" /></button>
+              <button className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" title="Add book context"><Layers className="h-4 w-4" /></button>
+              <div className="ml-auto">
+                <button
+                  onClick={() => send(input)}
+                  disabled={!input.trim() || thinking}
+                  className="inline-flex items-center gap-2 rounded-md bg-foreground px-3 py-1.5 text-sm text-background transition hover:opacity-90 disabled:opacity-50"
+                >
+                  Send <Send className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           </div>
         </Panel>
 
         <Panel title="Suggested prompts">
           <ul className="space-y-2">
-            {suggested.map((s) => (
+            {SUGGESTED.map((s) => (
               <li key={s}>
-                <button onClick={() => setMsg(s)} className="group flex w-full items-start gap-2 rounded-lg border border-border p-3 text-left text-sm hover:border-foreground/40">
+                <button onClick={() => send(s)} className="group flex w-full items-start gap-2 rounded-lg border border-border p-3 text-left text-sm hover:border-foreground/40">
                   <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
                   <span className="flex-1">{s}</span>
                   <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-0 transition group-hover:opacity-100" />
@@ -211,6 +298,9 @@ export function AssistantPage() {
               </li>
             ))}
           </ul>
+          <div className="mt-4 rounded-lg border border-border bg-secondary/40 p-3 text-[11px] text-muted-foreground">
+            Prototype: responses are scripted from your mock book data. The backend path is one Claude call with this data as retrieval context — the citations and workflow hand-offs carry over unchanged.
+          </div>
         </Panel>
       </div>
     </div>
