@@ -898,6 +898,105 @@ export type BindOrder = {
   activity: ActivityEntry[];
 };
 
+/* ============================================================
+   Endorsement / Mid-Term Change (MGA roadmap #6): read request →
+   diff vs in-force policy → appetite re-check + rate impact →
+   draft updated schedule → human issue. Backend seam = read the
+   in-force policy record + write back the issued endorsement.
+   ============================================================ */
+
+export type EndDiffRow = { label: string; before: string; after: string; direction: "up" | "down" | "same" };
+export type EndAppetite = { rule: string; pass: boolean; hard: boolean; detail: string };
+export type EndorsementDetail = {
+  classification: "ROUTINE" | "UNDERWRITING_REVIEW";
+  premiumBearing: boolean;
+  premiumDelta: string; // e.g. "+$14,200" or "No change"
+  rationale: string;
+  diff: EndDiffRow[]; // in-force vs after
+  appetite: EndAppetite[];
+  hardRulePassed: boolean;
+  schedule: string[]; // drafted updated-schedule lines
+};
+
+const endorsementDetails: Record<string, EndorsementDetail> = {
+  "END-8814": {
+    classification: "UNDERWRITING_REVIEW",
+    premiumBearing: true,
+    premiumDelta: "+$14,200",
+    rationale: "New location adds ~$2.4M TIV in a permitted state; class unchanged. Premium-bearing, pro-rated to expiry.",
+    diff: [
+      { label: "Locations", before: "14", after: "15 · +Ocala FL", direction: "up" },
+      { label: "TIV", before: "$42.8M", after: "$45.2M", direction: "up" },
+      { label: "Sprinklered", before: "92%", after: "93%", direction: "up" },
+      { label: "Premium", before: "$187,400", after: "$201,600", direction: "up" },
+    ],
+    appetite: [
+      { rule: "New location in permitted state", pass: true, hard: true, detail: "Ocala FL — allowed" },
+      { rule: "TIV under $250M cap", pass: true, hard: true, detail: "$45.2M" },
+      { rule: "Sprinklered ≥ 80% TIV", pass: true, hard: true, detail: "93%" },
+    ],
+    hardRulePassed: true,
+    schedule: ["Add location: 88 Industrial Way, Ocala FL 34470", "Increase Building/BPP limit +$2.4M TIV", "Pro-rata premium +$14,200 to 02/12/2027 expiry"],
+  },
+  "END-8813": {
+    classification: "UNDERWRITING_REVIEW",
+    premiumBearing: true,
+    premiumDelta: "+$9,600",
+    rationale: "Limit increase raises exposure; within authority. Refer for rate adequacy review.",
+    diff: [
+      { label: "Per-occurrence limit", before: "$5M", after: "$7.5M", direction: "up" },
+      { label: "Premium", before: "$421,000", after: "$430,600", direction: "up" },
+    ],
+    appetite: [
+      { rule: "Limit within binding authority", pass: true, hard: true, detail: "$7.5M ≤ $10M authority" },
+      { rule: "Loss ratio 5yr < 55%", pass: true, hard: false, detail: "42%" },
+    ],
+    hardRulePassed: true,
+    schedule: ["Increase per-occurrence limit $5M → $7.5M", "Pro-rata premium +$9,600"],
+  },
+  "END-8812": {
+    classification: "ROUTINE",
+    premiumBearing: false,
+    premiumDelta: "No change",
+    rationale: "Administrative — adding an additional insured for a contract. No exposure or class change.",
+    diff: [
+      { label: "Additional insured", before: "—", after: "+Cedar Grove Holdings LLC", direction: "same" },
+      { label: "Premium", before: "$118,400", after: "$118,400", direction: "same" },
+    ],
+    appetite: [{ rule: "Change touches class/state/severity", pass: true, hard: false, detail: "No — administrative" }],
+    hardRulePassed: true,
+    schedule: ["Add additional insured: Cedar Grove Holdings LLC (per contract)", "No premium change"],
+  },
+  "END-8811": {
+    classification: "ROUTINE",
+    premiumBearing: true,
+    premiumDelta: "-$1,140",
+    rationale: "Vehicle removed from schedule; premium-bearing return premium.",
+    diff: [
+      { label: "Scheduled vehicles", before: "6", after: "5", direction: "down" },
+      { label: "Premium", before: "$96,200", after: "$95,060", direction: "down" },
+    ],
+    appetite: [{ rule: "Change touches class/state/severity", pass: true, hard: false, detail: "No — reduces exposure" }],
+    hardRulePassed: true,
+    schedule: ["Remove vehicle VIN …4471 from schedule", "Return premium -$1,140"],
+  },
+};
+
+export function getEndorsementDetail(id: string, type: string): EndorsementDetail {
+  return (
+    endorsementDetails[id] ?? {
+      classification: /location|limit|class|operations/i.test(type) ? "UNDERWRITING_REVIEW" : "ROUTINE",
+      premiumBearing: !/no premium/i.test(type),
+      premiumDelta: "TBD",
+      rationale: "Change read from the request; diffed against the in-force policy.",
+      diff: [{ label: "Requested change", before: "in-force", after: type, direction: "same" }],
+      appetite: [{ rule: "Within appetite", pass: true, hard: true, detail: "—" }],
+      hardRulePassed: true,
+      schedule: [type],
+    }
+  );
+}
+
 export function getBindOrder(): BindOrder {
   return {
     submissionId: "SUB-24019",
