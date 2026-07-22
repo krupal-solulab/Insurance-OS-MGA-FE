@@ -341,7 +341,8 @@ export function RulesConsole() {
   useEffect(() => {
     try {
       const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
-      if (raw) setStore(JSON.parse(raw));
+      // Merge onto the seed so newly-added categories (e.g. Appetite) are always present.
+      if (raw) setStore({ ...seedStore(), ...JSON.parse(raw) });
     } catch {
       /* ignore corrupt storage */
     }
