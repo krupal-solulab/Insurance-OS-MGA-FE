@@ -37,7 +37,7 @@ import { useRole, SeniorOnlyNote } from "./role";
 
 const STORAGE_KEY = "coverline.rules.v1";
 
-type CategoryKey = "ACORD" | "Financials" | "Loss Run" | "SOV" | "Combined";
+type CategoryKey = "ACORD" | "Financials" | "Loss Run" | "SOV" | "Combined" | "Appetite";
 
 const CATEGORIES: { key: CategoryKey; label: string; icon: any; blurb: string }[] = [
   { key: "ACORD", label: "ACORD", icon: FileText, blurb: "Application form completeness & format" },
@@ -45,6 +45,7 @@ const CATEGORIES: { key: CategoryKey; label: string; icon: any; blurb: string }[
   { key: "Loss Run", label: "Loss Run", icon: HistoryIcon, blurb: "Loss history depth & severity" },
   { key: "SOV", label: "SOV", icon: Layers, blurb: "Schedule of values integrity" },
   { key: "Combined", label: "Combined", icon: ShieldCheck, blurb: "Cross-document reconciliation" },
+  { key: "Appetite", label: "Appetite", icon: Gavel, blurb: "Account-level underwriting appetite" },
 ];
 
 type Check = "required" | "regex" | "min" | "max" | "compare" | "crossDoc";
@@ -138,6 +139,13 @@ const ALL_RULES: Record<CategoryKey, Rule[]> = {
     { id: "xdoc-location-match", label: "Location count matches", field: "sov.locationCount", check: "compare", params: { op: "eq", field2: "acord.locationCount" }, severity: "warn", message: "SOV location count does not match the ACORD application.", enabled: true },
     { id: "xdoc-address", label: "Mailing address captured", field: "acord.mailingAddress", check: "required", severity: "info", message: "Cannot verify address consistency — mailing address missing.", enabled: true },
   ],
+  Appetite: [
+    { id: "app-class", label: "Class captured (in appetite)", field: "acord.naics", check: "required", severity: "error", message: "Class/NAICS missing — cannot confirm the risk is in appetite.", enabled: true },
+    { id: "app-tiv-cap", label: "TIV under $250M capacity", field: "sov.tiv", check: "max", params: { max: 250000000 }, severity: "error", message: "TIV exceeds the $250M binding-authority cap.", enabled: true },
+    { id: "app-loss-ratio", label: "5yr loss ratio < 55%", field: "lossRun.lossRatio5yr", check: "max", params: { max: 0.55 }, severity: "error", message: "5-year loss ratio exceeds the 55% appetite ceiling.", enabled: true },
+    { id: "app-sprinklered", label: "Sprinklered ≥ 80% of TIV", field: "sov.sprinkleredPct", check: "min", params: { min: 0.8 }, severity: "warn", message: "Sprinklered TIV is below the 80% appetite threshold.", enabled: true },
+    { id: "app-large-loss", label: "No single loss > $250k", field: "lossRun.largestLoss", check: "max", params: { max: 250000 }, severity: "warn", message: "A single loss exceeds $250k — refer to a senior underwriter.", enabled: true },
+  ],
 };
 
 // Build a plausible multi-version history for each category so rollback is demoable.
@@ -190,6 +198,13 @@ function seedStore(): Store {
       ["TIV + revenue reconciliation", "Added location-count match", "Added address-capture guard"],
       ["2025-11-12 15:03", "2025-12-20 09:57", "2026-01-09 13:30"],
       ["Michael Chen", "Priya Rao", "Priya Rao"],
+    ),
+    Appetite: build(
+      "Appetite",
+      [3, 5],
+      ["Initial appetite (class · TIV · loss ratio)", "Added sprinkler & large-loss thresholds"],
+      ["2025-11-04 09:50", "2025-12-15 10:22"],
+      ["Priya Rao", "Priya Rao"],
     ),
   };
 }
