@@ -27,6 +27,7 @@ import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
 import { useRole, JUNIOR_PREMIUM_CAP, parseMoney } from "./role";
+import { useDecisions } from "./decisions";
 import {
   renewals,
   getRenewalDetail,
@@ -136,6 +137,7 @@ export function RenewalManagement() {
 
   const { role } = useRole();
   const isJunior = role === "junior";
+  const { record } = useDecisions();
 
   const r = renewals.find((x) => x.id === selected)!;
   const d = details[selected];
@@ -156,6 +158,7 @@ export function RenewalManagement() {
     const label = RENEWAL_REC_LABEL[d.recommendation];
     setDecisions((prev) => ({ ...prev, [selected]: { action: d.recommendation === "NON_RENEW" ? "nonrenew" : "approved", label } }));
     logActivity({ who: "Priya R. (UW)", what: `Approved — ${label}`, ctx: "AI + underwriter co-sign" });
+    record({ actor: "human", who: "Priya R. (UW)", what: `${label}`, ctx: r.insured, workflow: "Renewal" });
     if (d.recommendation === "NON_RENEW") setDraft("nonrenew");
   }
   function requestInfo() {
@@ -164,16 +167,15 @@ export function RenewalManagement() {
   }
   function escalate() {
     setDecisions((prev) => ({ ...prev, [selected]: { action: "escalated", label: "Escalated to senior" } }));
-    logActivity({
-      who: "Sofia A. (Jr UW)",
-      what: "Escalated to senior underwriter",
-      ctx: overCap ? "above authority limit" : !d.hardRulePassed ? "appetite drift / non-renew" : "escalated decision",
-    });
+    const ctx = overCap ? "above authority limit" : !d.hardRulePassed ? "appetite drift / non-renew" : "escalated decision";
+    logActivity({ who: "Sofia A. (Jr UW)", what: "Escalated to senior underwriter", ctx });
+    record({ actor: "human", who: "Sofia A. (Jr UW)", what: "Escalated to senior", ctx: `${r.insured} · ${ctx}`, workflow: "Renewal" });
   }
   function confirmOverride() {
     if (!override) return;
     setDecisions((prev) => ({ ...prev, [selected]: { action: "changes", label: `Override → ${RENEWAL_REC_LABEL[override]}` } }));
     logActivity({ who: "Priya R. (UW)", what: `Override → ${RENEWAL_REC_LABEL[override]}`, ctx: overrideReason || "no reason given" });
+    record({ actor: "human", who: "Priya R. (UW)", what: `Override → ${RENEWAL_REC_LABEL[override]}`, ctx: `${r.insured} · ${overrideReason || "no reason"}`, workflow: "Renewal" });
     setOverride(null);
     setOverrideReason("");
   }

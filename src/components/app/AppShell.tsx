@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   BarChart3,
   FileSpreadsheet,
-  Siren,
   ScrollText,
   Sparkles,
   Scan,
@@ -29,6 +28,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { RoleProvider, useRole, ROLE_IDENTITY } from "./role";
+import { DecisionsProvider } from "./decisions";
 
 const workflows = [
   { slug: "submission-triage", label: "Submission Triage", icon: Inbox, badge: "12" },
@@ -40,7 +40,7 @@ const workflows = [
   { slug: "appetite", label: "Appetite Governance", icon: ShieldCheck },
   { slug: "portfolio", label: "Portfolio & Book", icon: BarChart3 },
   { slug: "bordereau", label: "Bordereau Reporting", icon: FileSpreadsheet },
-  { slug: "claims", label: "Claims Intake", icon: Siren, badge: "2" },
+  // Claims Intake — hidden from nav for now (roadmap/future); route still exists.
   { slug: "rules-console", label: "Rules Console", icon: ScrollText },
 ];
 
@@ -74,6 +74,7 @@ export function AppShell() {
 
   return (
     <RoleProvider>
+      <DecisionsProvider>
       <div className="min-h-screen bg-background text-foreground">
         <div className="flex min-h-screen">
           <Sidebar pathname={loc.pathname} />
@@ -96,6 +97,7 @@ export function AppShell() {
           </button>
         )}
       </div>
+      </DecisionsProvider>
     </RoleProvider>
   );
 }

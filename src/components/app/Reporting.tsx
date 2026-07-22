@@ -4,8 +4,9 @@ import { Download, Gavel, ShieldAlert, CheckCircle2, Search, Filter, ArrowUpRigh
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
-import { useRole, SeniorOnlyNote } from "./role";
-import { decisionsLog, brokers, monthlyPipeline, stateMix, nowClock, type ActivityEntry } from "./mocks";
+import { useRole, SeniorOnlyNote, parseMoney } from "./role";
+import { useDecisions } from "./decisions";
+import { brokers, monthlyPipeline, stateMix, submissions, renewals, getRenewalDetail, type ActivityEntry } from "./mocks";
 
 /* ============================================================
    Governance & Portfolio reporting — clickable, no backend.
@@ -55,35 +56,47 @@ const overrideByRule = [
   { rule: "No open flood claim > $250k", overrides: 5, total: 61 },
   { rule: "Sprinklered ≥ 80% TIV", overrides: 4, total: 208 },
 ];
-const drift = [
-  { insured: "Ridgeline Contractors", detail: "Class reclassified — excluded under rules v3 (was in appetite at binding under v1)", to: "/app/workflows/renewal-management" },
-  { insured: "FL cold-storage book", detail: "Loss ratio trending +8pp above plan — review deductible floors", to: "/app/workflows/portfolio" },
-];
+// Appetite drift computed from renewals that fail the current appetite rules.
+function computeDrift() {
+  return renewals
+    .map((r) => ({ r, d: getRenewalDetail(r) }))
+    .filter((x) => !x.d.hardRulePassed || x.d.recommendation === "NON_RENEW")
+    .map((x) => ({
+      insured: x.r.insured,
+      detail: x.d.appetiteDrift ?? "Now fails current appetite rules — review non-renewal.",
+      to: "/app/workflows/renewal-management",
+    }));
+}
 
 export function AppetiteGovernance() {
   const { role } = useRole();
   const isJunior = role === "junior";
+  const { entries, record } = useDecisions();
   const [f, setF] = useState<"All" | "AI" | "Human">("All");
   const [q, setQ] = useState("");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [reported, setReported] = useState(false);
+  const drift = useMemo(computeDrift, []);
 
   const rows = useMemo(
     () =>
-      decisionsLog.filter((d) => {
-        const isAI = d.who.includes("AI");
-        if (f === "AI" && !isAI) return false;
-        if (f === "Human" && isAI) return false;
-        if (isJunior && isAI) return true; // jr still sees AI context, but see note below
-        if (q && ![d.who, d.what, d.ctx].some((v) => v.toLowerCase().includes(q.toLowerCase()))) return false;
+      entries.filter((d) => {
+        if (f === "AI" && d.actor !== "ai") return false;
+        if (f === "Human" && d.actor !== "human") return false;
+        if (q && ![d.who, d.what, d.ctx ?? ""].some((v) => v.toLowerCase().includes(q.toLowerCase()))) return false;
         return true;
       }),
-    [f, q, isJunior],
+    [entries, f, q],
   );
+
+  const total = entries.length;
+  const overrides = entries.filter((e) => /override/i.test(e.what)).length;
+  const overrideRate = total ? ((overrides / total) * 100).toFixed(1) : "0";
 
   function generateReport() {
     setReported(true);
-    setActivity((a) => [...a, { at: nowClock(), who: "Priya R. (UW)", what: "Generated Q1 compliance report", ctx: "1,284 decisions · 42 overrides" }]);
+    setActivity((a) => [...a, { at: "now", who: "Priya R. (UW)", what: "Generated compliance report", ctx: `${total} decisions · ${overrides} overrides` }]);
+    record({ actor: "human", who: "Priya R. (UW)", what: "Generated compliance report", ctx: `${total} decisions`, workflow: "Governance" });
   }
 
   return (
@@ -99,9 +112,9 @@ export function AppetiteGovernance() {
       {reported && <div className="mb-4"><Chip tone="success"><CheckCircle2 className="h-3 w-3" /> Compliance report generated — see Activity</Chip></div>}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi label="Decisions this month" value="1,284" sub="AI + human" />
-        <Kpi label="Override rate" value="3.3%" sub="42 overrides" />
-        <Kpi label="Rule performance" value="98.2%" sub="AI aligned with UW" />
+        <Kpi label="Decisions logged" value={String(total)} sub="live · AI + human" />
+        <Kpi label="Override rate" value={`${overrideRate}%`} sub={`${overrides} overrides`} />
+        <Kpi label="Appetite drift" value={String(drift.length)} sub="accounts now failing" />
         <Kpi label="Avg AI confidence" value="91%" sub="+2pp vs Q4" />
       </div>
 
@@ -126,11 +139,11 @@ export function AppetiteGovernance() {
             ))}
           </div>
           <ul className="divide-y divide-border">
-            {rows.map((d, i) => (
+            {[...rows].reverse().map((d, i) => (
               <li key={i} className="flex items-start gap-3 py-3 text-sm">
                 <span className="mt-0.5 w-12 shrink-0 font-mono text-[10px] text-muted-foreground">{d.at}</span>
-                <div className="flex-1"><div><b>{d.who}</b> — {d.what}</div><div className="text-[11px] text-muted-foreground">{d.ctx}</div></div>
-                {d.conf !== "—" && <Chip>{d.conf}</Chip>}
+                <div className="flex-1"><div><b>{d.who}</b> — {d.what}</div>{d.ctx && <div className="text-[11px] text-muted-foreground">{d.ctx}</div>}</div>
+                {d.workflow && <Chip>{d.workflow}</Chip>}
               </li>
             ))}
             {rows.length === 0 && <li className="py-6 text-center text-sm text-muted-foreground">No matching decisions.</li>}
@@ -192,6 +205,14 @@ export function Portfolio() {
   const boundPremium = 48.2 * k;
   const pif = Math.round(2148 * (0.6 + 0.4 * k));
 
+  // Computed cuts (roadmap: appetite-drift + book-by-line-of-business).
+  const driftCount = useMemo(() => renewals.filter((r) => { const dd = getRenewalDetail(r); return !dd.hardRulePassed || dd.recommendation === "NON_RENEW"; }).length, []);
+  const byLob = useMemo(() => {
+    const m: Record<string, number> = {};
+    submissions.forEach((s) => { m[s.lob] = (m[s.lob] ?? 0) + parseMoney(s.premium); });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, []);
+
   return (
     <div className="mx-auto max-w-[1500px]">
       <PageHeader
@@ -216,7 +237,7 @@ export function Portfolio() {
         <Kpi label="Hit ratio" value="38.4%" sub="+1.7pp" to="/app/workflows/submission-triage" />
         <Kpi label="Loss ratio" value="41.6%" sub="plan 45%" />
         <Kpi label="Renewal retention" value="92%" sub="+3pp" to="/app/workflows/renewal-management" />
-        <Kpi label="Policies in force" value={pif.toLocaleString()} sub={`${period} view`} />
+        <Kpi label="Appetite drift" value={String(driftCount)} sub="accounts to review" to="/app/workflows/appetite" />
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
@@ -280,6 +301,21 @@ export function Portfolio() {
           <div className="mt-3 inline-flex items-center gap-1 text-[11px] text-muted-foreground"><TrendingUp className="h-3 w-3 text-success" /> Generated from the {period} decision log</div>
         </Panel>
       </div>
+
+      <Panel title="Book by line of business" subtitle="Computed from live submissions · $ premium" className="mt-5">
+        <div className="space-y-2">
+          {byLob.map(([lob, amt]) => {
+            const max = Math.max(...byLob.map((x) => x[1]));
+            return (
+              <div key={lob} className="flex items-center gap-3 text-xs">
+                <div className="w-32 truncate text-muted-foreground">{lob}</div>
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-secondary"><div className="h-full bg-accent" style={{ width: `${(amt / max) * 100}%` }} /></div>
+                <div className="w-20 text-right font-mono">${Math.round((amt * k) / 1000)}k</div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
     </div>
   );
 }

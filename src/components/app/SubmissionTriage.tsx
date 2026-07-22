@@ -32,6 +32,7 @@ import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
 import { useRole, JUNIOR_PREMIUM_CAP, parseMoney } from "./role";
+import { useDecisions } from "./decisions";
 import {
   submissions,
   getTriageDetail,
@@ -161,6 +162,7 @@ export function SubmissionTriage() {
 
   const { role } = useRole();
   const isJunior = role === "junior";
+  const { record } = useDecisions();
 
   const s = submissions.find((x) => x.id === selected)!;
   const d = details[selected];
@@ -220,16 +222,15 @@ export function SubmissionTriage() {
 
   function escalate() {
     setDecisions((prev) => ({ ...prev, [selected]: { action: "escalated", label: "Escalated to senior" } }));
-    logActivity({
-      who: "Sofia A. (Jr UW)",
-      what: "Escalated to senior underwriter",
-      ctx: overCap ? "above authority limit" : !d.hardRulePassed ? "hard-rule appetite fail" : "decline decision",
-    });
+    const ctx = overCap ? "above authority limit" : !d.hardRulePassed ? "hard-rule appetite fail" : "decline decision";
+    logActivity({ who: "Sofia A. (Jr UW)", what: "Escalated to senior underwriter", ctx });
+    record({ actor: "human", who: "Sofia A. (Jr UW)", what: "Escalated to senior", ctx: `${s.insured} · ${ctx}`, workflow: "Submission Triage" });
   }
 
   function approve() {
     setDecisions((prev) => ({ ...prev, [selected]: { action: "approved", label: RECOMMENDATION_LABEL[d.recommendation] } }));
     logActivity({ who: "Priya R. (UW)", what: `Approved recommendation — ${RECOMMENDATION_LABEL[d.recommendation]}`, ctx: "AI + underwriter co-sign" });
+    record({ actor: "human", who: "Priya R. (UW)", what: `Approved — ${RECOMMENDATION_LABEL[d.recommendation]}`, ctx: s.insured, workflow: "Submission Triage" });
   }
   function requestInfo() {
     setDecisions((prev) => ({ ...prev, [selected]: { action: "info_requested", label: "Request info" } }));
@@ -239,6 +240,7 @@ export function SubmissionTriage() {
     if (!override) return;
     setDecisions((prev) => ({ ...prev, [selected]: { action: "overridden", label: `Override → ${RECOMMENDATION_LABEL[override]}` } }));
     logActivity({ who: "Priya R. (UW)", what: `Override → ${RECOMMENDATION_LABEL[override]}`, ctx: overrideReason || "no reason given" });
+    record({ actor: "human", who: "Priya R. (UW)", what: `Override → ${RECOMMENDATION_LABEL[override]}`, ctx: `${s.insured} · ${overrideReason || "no reason"}`, workflow: "Submission Triage" });
     setOverride(null);
     setOverrideReason("");
   }

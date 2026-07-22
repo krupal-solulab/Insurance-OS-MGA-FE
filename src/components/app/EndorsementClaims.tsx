@@ -1,5 +1,6 @@
+import { Link } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
-import { CheckCircle2, AlertTriangle, ShieldAlert, Send, Siren, TrendingUp, TrendingDown, Minus, FileText, Gavel } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ShieldAlert, Send, Siren, TrendingUp, TrendingDown, Minus, FileText, Gavel, ArrowUpRight } from "lucide-react";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
@@ -143,7 +144,15 @@ export function Endorsements() {
                   <li key={i} className="flex items-start gap-2"><FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />{s}</li>
                 ))}
               </ul>
-              <div className="mt-3"><Button variant="secondary" className="!py-1 !text-xs" onClick={() => act("Endorsement schedule drafted", "Priya R. (UW)", e.id)} disabled={!!done}>Draft to broker</Button></div>
+              <div className="mt-3">
+                <Link
+                  to={"/app/workflows/broker-copilot" as any}
+                  onClick={() => log({ who: "Priya R. (UW)", what: "Sent endorsement schedule to Broker Copilot", ctx: e.id })}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-xs transition hover:bg-secondary"
+                >
+                  Draft to broker <ArrowUpRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
             </Panel>
           </div>
 
