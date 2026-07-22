@@ -886,13 +886,16 @@ export function getRenewalDetail(r: Renewal): RenewalDetail {
    action with a real PAS write-back call.
    ============================================================ */
 
-export type BindCheck = { id: string; label: string; note: string; cleared: boolean; kind: "subjectivity" | "compliance" };
+export type BindCheck = { id: string; label: string; note: string; cleared: boolean; kind: "subjectivity" | "compliance"; tier?: "material" | "routine" };
 export type PacketItem = { label: string; ready: boolean };
 export type BindOrder = {
+  id: string;
   submissionId: string;
   insured: string;
+  lob: string;
   premium: string;
   effective: string;
+  bindBy: string;
   checks: BindCheck[];
   packet: PacketItem[];
   activity: ActivityEntry[];
@@ -997,30 +1000,69 @@ export function getEndorsementDetail(id: string, type: string): EndorsementDetai
   );
 }
 
-export function getBindOrder(): BindOrder {
-  return {
+const packet = (surplus: boolean): PacketItem[] => [
+  { label: "Binder", ready: true },
+  { label: "Policy jacket", ready: true },
+  { label: "Endorsement schedule", ready: true },
+  { label: "Surplus-lines filing", ready: surplus },
+  { label: "PAS write-back", ready: false },
+];
+
+// Bind queue — approved submissions/quotes ready to bind.
+export const bindOrders: BindOrder[] = [
+  {
+    id: "BND-9001",
     submissionId: "SUB-24019",
     insured: "Palmetto Cold Storage LLC",
+    lob: "Property + GL",
     premium: "$187,400",
     effective: "02/12/2026",
+    bindBy: "Feb 10 — hold rate",
     checks: [
-      { id: "sub-sprinkler", label: "Sprinkler certification", note: "Requested from broker Jan 07", cleared: true, kind: "subjectivity" },
-      { id: "sub-monitoring", label: "Refrigeration monitoring cert", note: "Required for spoilage sub-limit", cleared: true, kind: "subjectivity" },
-      { id: "sub-inspection", label: "Inspection — 3 new locations", note: "No material findings", cleared: true, kind: "subjectivity" },
-      { id: "sub-payment", label: "Down-payment received", note: "$56,220 via ACH Jan 11", cleared: false, kind: "subjectivity" },
-      { id: "comp-ofac", label: "OFAC clearance", note: "Named insured + principals", cleared: true, kind: "compliance" },
-      { id: "comp-sl", label: "Surplus-lines tax (FL)", note: "Calculated · filing prepared", cleared: false, kind: "compliance" },
+      { id: "sub-sprinkler", label: "Sprinkler certification", note: "Received Jan 09", cleared: true, kind: "subjectivity", tier: "material" },
+      { id: "sub-inspection", label: "Inspection — 3 new locations", note: "No material findings", cleared: true, kind: "subjectivity", tier: "material" },
+      { id: "sub-payment", label: "Down-payment received", note: "$56,220 via ACH", cleared: false, kind: "subjectivity", tier: "material" },
+      { id: "sub-monitoring", label: "Refrigeration monitoring cert", note: "For spoilage sub-limit", cleared: false, kind: "subjectivity", tier: "routine" },
+      { id: "comp-ofac", label: "OFAC clearance", note: "Insured + principals", cleared: true, kind: "compliance", tier: "material" },
+      { id: "comp-sl", label: "Surplus-lines tax (FL)", note: "Filing prepared", cleared: false, kind: "compliance", tier: "material" },
     ],
-    packet: [
-      { label: "Binder", ready: true },
-      { label: "Policy jacket", ready: true },
-      { label: "Endorsement schedule", ready: true },
-      { label: "Surplus-lines filing", ready: false },
-      { label: "PAS write-back", ready: false },
-    ],
+    packet: packet(false),
     activity: [{ at: "09:15", who: "AI · Decision Core", what: "Bind order prepared from approved submission", ctx: "SUB-24019", conf: "—" }],
-  };
-}
+  },
+  {
+    id: "BND-9002",
+    submissionId: "SUB-24012",
+    insured: "Copperline Data Center Ops",
+    lob: "Property + Cyber",
+    premium: "$612,300",
+    effective: "02/28/2026",
+    bindBy: "Feb 25",
+    checks: [
+      { id: "sub-cyber", label: "Cyber questionnaire", note: "Complete", cleared: true, kind: "subjectivity", tier: "material" },
+      { id: "sub-payment2", label: "Down-payment received", note: "$183,690 via wire", cleared: true, kind: "subjectivity", tier: "material" },
+      { id: "comp-ofac2", label: "OFAC clearance", note: "Clear", cleared: true, kind: "compliance", tier: "material" },
+      { id: "comp-sl2", label: "Surplus-lines tax (VA)", note: "Filed", cleared: true, kind: "compliance", tier: "material" },
+    ],
+    packet: packet(true),
+    activity: [{ at: "10:02", who: "AI · Decision Core", what: "Bind order prepared", ctx: "SUB-24012 · all conditions met", conf: "—" }],
+  },
+  {
+    id: "BND-9003",
+    submissionId: "SUB-24016",
+    insured: "Highline Hospitality Group",
+    lob: "Property + Liquor",
+    premium: "$421,000",
+    effective: "02/20/2026",
+    bindBy: "Feb 18",
+    checks: [
+      { id: "sub-liquor", label: "Liquor liability endorsement", note: "Confirm limits", cleared: false, kind: "subjectivity", tier: "material" },
+      { id: "sub-payment3", label: "Down-payment received", note: "Pending broker", cleared: false, kind: "subjectivity", tier: "material" },
+      { id: "comp-ofac3", label: "OFAC clearance", note: "Clear", cleared: true, kind: "compliance", tier: "material" },
+    ],
+    packet: packet(false),
+    activity: [{ at: "08:40", who: "AI · Decision Core", what: "Bind order prepared", ctx: "SUB-24016", conf: "—" }],
+  },
+];
 
 /* ============================================================
    Broker Communication — PRD-aligned draft model.
