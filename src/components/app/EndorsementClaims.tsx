@@ -1,14 +1,84 @@
 import { Link } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
-import { CheckCircle2, AlertTriangle, ShieldAlert, Send, Siren, TrendingUp, TrendingDown, Minus, FileText, Gavel, ArrowUpRight } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { CheckCircle2, AlertTriangle, ShieldAlert, Send, Siren, TrendingUp, TrendingDown, Minus, FileText, Gavel, ArrowUpRight, WifiOff } from "lucide-react";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
 import { useRole } from "./role";
-import { endorsements, claims, getEndorsementDetail, nowClock, type ActivityEntry } from "./mocks";
+import { endorsements, claims, getEndorsementDetail, nowClock, type ActivityEntry, type EndorsementDetail } from "./mocks";
+import {
+  listEndorsements,
+  getEndorsement,
+  runScenario,
+  actOnEndorsement,
+  type EndorsementDetailDTO,
+  type EndorsementRowDTO,
+} from "@/lib/endorsement-processing-api";
 
-/* Endorsement (#6, MGA framing) + Claims (#10, preview) — minimal
-   clickable prototypes, no backend, role-gated where it matters. */
+/* Endorsement (#6, MGA framing) — backend-connected: on mount, tries
+   the real Backend-AI-OS /api/mga/endorsement-processing endpoint
+   (MEP-01..MEP-07, real premium impact via the Quoting & Rating
+   engine). Falls back to the local mock queue (mocks.ts, unchanged)
+   if the backend is unreachable or has no processed changes yet, so
+   this screen still works standalone.
+   Claims (#10, preview) — minimal clickable prototype, no backend,
+   illustrative only. */
+
+const SCENARIOS = ["scenario_01", "scenario_02", "scenario_03", "scenario_04", "scenario_05", "scenario_06"];
+
+function fromDTO(d: EndorsementDetailDTO): EndorsementDetail {
+  return {
+    classification: d.classification === "MATERIAL" ? "UNDERWRITING_REVIEW" : "ROUTINE",
+    premiumBearing: d.premiumBearing,
+    premiumDelta: d.premiumDelta,
+    rationale: d.rationale,
+    diff: d.diff.map((r) => ({ label: r.label, before: r.before, after: r.after, direction: r.direction as "up" | "down" | "same" })),
+    appetite: d.appetite.map((a) => ({ rule: a.rule, pass: a.pass, hard: a.hard, detail: a.detail })),
+    hardRulePassed: d.hardRulePassed,
+    schedule: d.schedule,
+  };
+}
+
+/** Fetch real endorsements on mount; trigger the 6 dataset scenarios if none exist yet. */
+function useBackendEndorsements(role: "junior" | "senior") {
+  const [rows, setRows] = useState<EndorsementRowDTO[] | null>(null);
+  const [details, setDetails] = useState<Record<string, EndorsementDetailDTO>>({});
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listEndorsements(role)
+      .then(async (existing) => {
+        if (cancelled) return;
+        setConnected(true);
+        let list = existing;
+        if (list.length === 0) {
+          await Promise.all(SCENARIOS.map((s) => runScenario(role, s).catch(() => null)));
+          if (cancelled) return;
+          list = await listEndorsements(role).catch(() => []);
+        }
+        if (cancelled || list.length === 0) return;
+        const byId: Record<string, EndorsementDetailDTO> = {};
+        await Promise.all(
+          list.map(async (row) => {
+            const d = await getEndorsement(role, row.id).catch(() => null);
+            if (d) byId[row.id] = d;
+          }),
+        );
+        if (cancelled) return;
+        setDetails(byId);
+        setRows(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  return { rows, details, connected };
+}
 
 function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" | "success" | "warn" | "danger" }) {
   const map: Record<string, string> = {
@@ -49,25 +119,54 @@ function ActivityList({ items }: { items: ActivityEntry[] }) {
 export function Endorsements() {
   const { role } = useRole();
   const isJunior = role === "junior";
-  const [sel, setSel] = useState(endorsements[0].id);
+  const { rows: backendRows, details: backendDetails, connected } = useBackendEndorsements(role);
+
+  // Real backend rows replace the mock queue only once at least one has actually loaded;
+  // otherwise this screen behaves exactly as the standalone prototype did before.
+  const queue: { id: string; policy: string; insured: string; type: string; requested: string; impact: string }[] =
+    backendRows ?? endorsements;
+  const getDetail = (id: string, type: string): EndorsementDetail => {
+    const backend = backendRows && backendDetails[id];
+    return backend ? fromDTO(backend) : getEndorsementDetail(id, type);
+  };
+
+  const [sel, setSel] = useState(queue[0].id);
+  useEffect(() => {
+    if (backendRows && backendRows.length > 0) setSel(backendRows[0].id);
+  }, [backendRows]);
+
   const [decisions, setDecisions] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
-  const e = endorsements.find((x) => x.id === sel)!;
-  const d = getEndorsementDetail(e.id, e.type);
+  const e = queue.find((x) => x.id === sel) ?? queue[0];
+  const d = getDetail(e.id, e.type);
   const review = d.classification === "UNDERWRITING_REVIEW";
   const canIssue = !isJunior || (!review && d.hardRulePassed); // material/review → senior
-  const done = decisions[sel];
+  const done = decisions[e.id];
 
   function log(entry: Omit<ActivityEntry, "at">) { setActivity((a) => [...a, { at: nowClock(), ...entry }]); }
-  function act(label: string, who: string, ctx: string) { setDecisions((x) => ({ ...x, [sel]: label })); log({ who, what: label, ctx }); }
+  // "Return to broker" has no backend counterpart (approve | send | escalate only) — kept
+  // local-only, same as Broker Copilot's discard/toggleReviewed actions.
+  function act(label: string, who: string, ctx: string, backendAction?: "approve" | "escalate") {
+    setDecisions((x) => ({ ...x, [e.id]: label }));
+    log({ who, what: label, ctx });
+    if (connected && backendAction) {
+      actOnEndorsement(role, e.id, backendAction).catch(() => {});
+    }
+  }
 
   return (
     <div className="mx-auto max-w-[1500px]">
       <PageHeader eyebrow="Workflow 04" title="Endorsement / Mid-Term Change" description="Read the change request, diff it against the in-force policy, re-check appetite & rate impact, and draft the updated schedule — human-issued." />
+      {!connected && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
+          <WifiOff className="h-3.5 w-3.5" />
+          Backend unavailable — showing sample change requests. Real endorsements appear automatically once the Endorsement Processing service is reachable.
+        </div>
+      )}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <Panel title="Open change requests">
-          <List items={endorsements} sel={sel} onSel={(id) => setSel(id)} render={(r) => {
-            const rd = getEndorsementDetail(r.id, r.type);
+          <List items={queue} sel={sel} onSel={(id) => setSel(id)} render={(r) => {
+            const rd = getDetail(r.id, r.type);
             return (
               <>
                 <div className="flex items-center justify-between text-sm"><span className="font-medium">{r.insured}</span><span className="text-[11px] text-muted-foreground">{r.requested}</span></div>
@@ -98,8 +197,8 @@ export function Endorsements() {
                 <div className="flex items-center gap-2">
                   <Button variant="secondary" onClick={() => act("Returned to broker", "Priya R. (UW)", e.id)}>Return to broker</Button>
                   {canIssue
-                    ? <Button variant="primary" onClick={() => act("Approved · endorsement issued · written to PAS", "Priya R. (UW)", `${e.type} · ${d.premiumDelta}`)}>Approve · issue</Button>
-                    : <Button variant="primary" onClick={() => act("Sent to senior for approval", "Sofia A. (Jr UW)", "material change")}>Send to senior <Send className="h-3.5 w-3.5" /></Button>}
+                    ? <Button variant="primary" onClick={() => act("Approved · endorsement issued · written to PAS", "Priya R. (UW)", `${e.type} · ${d.premiumDelta}`, "approve")}>Approve · issue</Button>
+                    : <Button variant="primary" onClick={() => act("Sent to senior for approval", "Sofia A. (Jr UW)", "material change", "escalate")}>Send to senior <Send className="h-3.5 w-3.5" /></Button>}
                 </div>
               )}
             </div>
