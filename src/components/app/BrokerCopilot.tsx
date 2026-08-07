@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   MessageSquare,
   Send,
@@ -20,6 +20,7 @@ import {
   ArrowUpRight,
   Star,
   Mail,
+  WifiOff,
 } from "lucide-react";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
@@ -34,14 +35,71 @@ import {
   type CommStatus,
   type ActivityEntry,
 } from "./mocks";
+import { actOnDraft, listDrafts, type CommDraftDTO } from "@/lib/broker-copilot-api";
 
 /* ============================================================
-   Broker Communication Copilot — PRD-aligned clickable
-   prototype. No backend: local state seeded from the mock
-   draft queue. Every draft is generated FROM a Triage/Renewal
-   decision. Human approves & sends every message — nothing
-   sends automatically.
+   Broker Communication Copilot — PRD-aligned. Backend-connected:
+   on mount, tries the real Backend-AI-OS `/api/mga/broker-copilot`
+   endpoint (drafts generated FROM a Triage/Renewal decision by the
+   real Decision Core + LLM). If the backend is unreachable or has
+   no drafts yet, falls back to the local mock queue (mocks.ts,
+   unchanged) so this screen still works standalone. Human approves
+   & sends every message — nothing sends automatically, in either
+   mode.
    ============================================================ */
+
+function fromDTO(d: CommDraftDTO): CommDraft {
+  return {
+    id: d.id,
+    type: d.type as CommType,
+    sourceWorkflow: d.sourceWorkflow as CommDraft["sourceWorkflow"],
+    sourceId: d.sourceId,
+    sourceRoute: d.sourceRoute,
+    namedInsured: d.namedInsured,
+    broker: {
+      name: d.broker.name,
+      agency: d.broker.agency,
+      email: d.broker.email,
+      tenureYears: d.broker.tenureYears,
+      volumeTier: d.broker.volumeTier as CommDraft["broker"]["volumeTier"],
+    },
+    subject: d.subject,
+    tone: d.tone,
+    toneWhy: d.toneWhy,
+    sensitive: d.sensitive,
+    requiresComplianceReview: d.requiresComplianceReview,
+    combined: d.combined ?? undefined,
+    deadlineRef: d.deadlineRef ?? undefined,
+    citations: d.citations,
+    body: d.body,
+    status: d.status as CommStatus,
+    generatedAt: d.generatedAt,
+  };
+}
+
+/** Fetch real drafts on mount; null while loading/unavailable so callers fall back to mock. */
+function useBackendDrafts(role: "junior" | "senior") {
+  const [drafts, setDrafts] = useState<CommDraft[] | null>(null);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listDrafts(role)
+      .then((dtos) => {
+        if (cancelled) return;
+        setConnected(true);
+        if (dtos.length > 0) setDrafts(dtos.map(fromDTO));
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  return { drafts, connected };
+}
 
 function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" | "success" | "warn" | "danger" }) {
   const map: Record<string, string> = {
@@ -96,44 +154,61 @@ function changedPct(orig: string, cur: string): number {
   return Math.min(100, Math.round((diff / max) * 100));
 }
 
+function seedState(queue: CommDraft[]): Record<string, DraftState> {
+  return Object.fromEntries(
+    queue.map((d) => [
+      d.id,
+      {
+        body: d.body,
+        status: d.status,
+        reviewed: false,
+        editedPct: null,
+        activity: [{ at: d.generatedAt.replace("Today · ", ""), who: "AI · Decision Core", what: `Drafted ${COMM_TYPE_LABEL[d.type]}`, ctx: `from ${d.sourceId}`, conf: "—" }],
+      } as DraftState,
+    ]),
+  );
+}
+
 export function BrokerCopilot() {
-  const [selected, setSelected] = useState(communicationQueue[0].id);
+  const { role } = useRole();
+  const { drafts: backendDrafts, connected } = useBackendDrafts(role);
+  // Real backend drafts replace the mock queue only once at least one has actually loaded;
+  // otherwise this screen behaves exactly as the standalone prototype did before.
+  const queue = backendDrafts ?? communicationQueue;
+
+  const [selected, setSelected] = useState(queue[0].id);
   const [filter, setFilter] = useState("All");
   const [query, setQuery] = useState("");
   const [editMode, setEditMode] = useState(false);
 
-  const [state, setState] = useState<Record<string, DraftState>>(() =>
-    Object.fromEntries(
-      communicationQueue.map((d) => [
-        d.id,
-        {
-          body: d.body,
-          status: d.status,
-          reviewed: false,
-          editedPct: null,
-          activity: [{ at: d.generatedAt.replace("Today · ", ""), who: "AI · Decision Core", what: `Drafted ${COMM_TYPE_LABEL[d.type]}`, ctx: `from ${d.sourceId}`, conf: "—" }],
-        } as DraftState,
-      ]),
-    ),
-  );
+  const [state, setState] = useState<Record<string, DraftState>>(() => seedState(queue));
 
-  const draft = communicationQueue.find((x) => x.id === selected)!;
-  const st = state[selected];
+  // Re-seed once real drafts arrive after the initial (mock) render.
+  useEffect(() => {
+    if (backendDrafts) {
+      setState(seedState(backendDrafts));
+      setSelected(backendDrafts[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendDrafts]);
+
+  const draft = queue.find((x) => x.id === selected) ?? queue[0];
+  const st = state[draft.id];
 
   const filtered = useMemo(
     () =>
-      communicationQueue.filter((d) => {
+      queue.filter((d) => {
         if (filter !== "All" && d.type !== filter) return false;
         if (!query.trim()) return true;
         const q = query.toLowerCase();
         return [d.namedInsured, d.broker.name, d.broker.agency, d.subject].some((v) => v.toLowerCase().includes(q));
       }),
-    [filter, query],
+    [queue, filter, query],
   );
 
   const pendingCompliance = useMemo(
-    () => communicationQueue.filter((d) => d.requiresComplianceReview && !state[d.id].reviewed && state[d.id].status !== "SENT" && state[d.id].status !== "DISCARDED").length,
-    [state],
+    () => queue.filter((d) => d.requiresComplianceReview && !state[d.id]?.reviewed && state[d.id]?.status !== "SENT" && state[d.id]?.status !== "DISCARDED").length,
+    [queue, state],
   );
 
   function patch(id: string, next: Partial<DraftState>, log?: Omit<ActivityEntry, "at">) {
@@ -145,28 +220,29 @@ export function BrokerCopilot() {
 
   function saveEdit(body: string) {
     const pct = changedPct(draft.body, body);
-    patch(selected, { body, editedPct: pct }, { who: "Priya R. (UW)", what: `Edited draft (${pct}% changed)` });
+    patch(draft.id, { body, editedPct: pct }, { who: "Priya R. (UW)", what: `Edited draft (${pct}% changed)` });
     setEditMode(false);
   }
   function regenerate() {
-    patch(selected, { body: draft.body, editedPct: null }, { who: "AI · Decision Core", what: "Regenerated draft" });
+    patch(draft.id, { body: draft.body, editedPct: null }, { who: "AI · Decision Core", what: "Regenerated draft" });
     setEditMode(false);
   }
   function approveSend() {
-    patch(selected, { status: "SENT" }, { who: "Priya R. (UW)", what: "Approved & sent", ctx: draft.broker.agency });
+    patch(draft.id, { status: "SENT" }, { who: "Priya R. (UW)", what: "Approved & sent", ctx: draft.broker.agency });
+    if (connected) actOnDraft(role, draft.sourceId, "send", st.body).catch(() => {});
   }
   function discard() {
-    patch(selected, { status: "DISCARDED" }, { who: "Priya R. (UW)", what: "Discarded draft" });
+    patch(draft.id, { status: "DISCARDED" }, { who: "Priya R. (UW)", what: "Discarded draft" });
   }
   function toggleReviewed() {
     const next = !st.reviewed;
-    patch(selected, { reviewed: next }, next ? { who: "Compliance", what: "Non-renewal notice compliance-reviewed" } : undefined);
+    patch(draft.id, { reviewed: next }, next ? { who: "Compliance", what: "Non-renewal notice compliance-reviewed" } : undefined);
   }
   function sendToSenior() {
-    patch(selected, { sentToSenior: true }, { who: "Sofia A. (Jr UW)", what: "Sent to senior for review", ctx: `${COMM_TYPE_LABEL[draft.type]} — sensitive` });
+    patch(draft.id, { sentToSenior: true }, { who: "Sofia A. (Jr UW)", what: "Sent to senior for review", ctx: `${COMM_TYPE_LABEL[draft.type]} — sensitive` });
+    if (connected) actOnDraft(role, draft.sourceId, "escalate").catch(() => {});
   }
 
-  const { role } = useRole();
   const isJunior = role === "junior";
   const juniorSensitive = isJunior && draft.sensitive;
 
@@ -181,6 +257,13 @@ export function BrokerCopilot() {
         description="Every broker email is drafted from a Triage or Renewal decision, tone-calibrated, and cited to source. You approve every send — nothing goes out automatically."
         actions={<Button variant="primary"><MessageSquare className="h-4 w-4" />New email</Button>}
       />
+
+      {!connected && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
+          <WifiOff className="h-3.5 w-3.5" />
+          Backend unavailable — showing sample drafts. Real drafts appear automatically once the Broker Copilot service is reachable.
+        </div>
+      )}
 
       {/* filters */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
