@@ -15,6 +15,14 @@ import {
   type GovernanceDetailDTO,
   type GovernanceRowDTO,
 } from "@/lib/appetite-governance-api";
+import {
+  listReports,
+  getReport,
+  runScenario as runPortfolioScenario,
+  actOnReport,
+  type PortfolioReportDetailDTO,
+  type PortfolioReportRowDTO,
+} from "@/lib/portfolio-reporting-api";
 
 /* ============================================================
    Governance & Portfolio reporting — clickable, with an
@@ -53,6 +61,48 @@ function useBackendGovernance(role: "junior" | "senior") {
         await Promise.all(
           list.map(async (row) => {
             const d = await getAudit(role, row.id).catch(() => null);
+            if (d) byId[row.id] = d;
+          }),
+        );
+        if (cancelled) return;
+        setDetails(byId);
+        setRows(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  return { rows, details, connected };
+}
+
+const PORTFOLIO_SCENARIOS = ["scenario_01", "scenario_02", "scenario_03", "scenario_04", "scenario_05", "scenario_06"];
+
+function useBackendPortfolio(role: "junior" | "senior") {
+  const [rows, setRows] = useState<PortfolioReportRowDTO[] | null>(null);
+  const [details, setDetails] = useState<Record<string, PortfolioReportDetailDTO>>({});
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listReports(role)
+      .then(async (existing) => {
+        if (cancelled) return;
+        setConnected(true);
+        let list = existing;
+        if (list.length === 0) {
+          await Promise.all(PORTFOLIO_SCENARIOS.map((s) => runPortfolioScenario(role, s).catch(() => null)));
+          if (cancelled) return;
+          list = await listReports(role).catch(() => []);
+        }
+        if (cancelled || list.length === 0) return;
+        const byId: Record<string, PortfolioReportDetailDTO> = {};
+        await Promise.all(
+          list.map(async (row) => {
+            const d = await getReport(role, row.id).catch(() => null);
             if (d) byId[row.id] = d;
           }),
         );
@@ -414,6 +464,7 @@ export function Portfolio() {
   const [period, setPeriod] = useState<Period>("YTD");
   const [exported, setExported] = useState(false);
   const k = PERIODS[period];
+  const { rows: backendRows, details: backendDetails, connected: backendConnected } = useBackendPortfolio(role);
 
   const boundPremium = 48.2 * k;
   const pif = Math.round(2148 * (0.6 + 0.4 * k));
@@ -529,6 +580,178 @@ export function Portfolio() {
           })}
         </div>
       </Panel>
+
+      {/* Real backend book performance report (backend-connected, PBR-01..PBR-07) */}
+      <PortfolioReportPanel
+        role={role}
+        rows={backendRows}
+        details={backendDetails}
+        connected={backendConnected}
+      />
     </div>
+  );
+}
+
+/** Real backend portfolio & book performance report (Workflow-08 dataset scenarios) —
+ * additive, shown below the illustrative executive analytics demo above rather than
+ * replacing it. */
+function PortfolioReportPanel({
+  role,
+  rows,
+  details,
+  connected,
+}: {
+  role: "junior" | "senior";
+  rows: PortfolioReportRowDTO[] | null;
+  details: Record<string, PortfolioReportDetailDTO>;
+  connected: boolean;
+}) {
+  const [sel, setSel] = useState<string | null>(null);
+  const list = rows ?? [];
+  const selected = sel ?? list[0]?.id ?? null;
+  const detail = selected ? details[selected] : undefined;
+
+  if (!connected) {
+    return (
+      <Panel title="Book performance report" subtitle="Backend-connected · PBR-01..PBR-07" className="mt-5">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
+          <WifiOff className="h-3.5 w-3.5" />
+          Backend unavailable — the illustrative executive analytics above still work. A real aggregated book performance report appears here automatically once the Portfolio & Book Performance Reporting service is reachable.
+        </div>
+      </Panel>
+    );
+  }
+
+  if (list.length === 0 || !detail) {
+    return (
+      <Panel title="Book performance report" subtitle="Backend-connected · PBR-01..PBR-07" className="mt-5">
+        <div className="text-sm text-muted-foreground">No book performance reports evaluated yet.</div>
+      </Panel>
+    );
+  }
+
+  function act(action: "approve" | "escalate" | "send") {
+    if (!selected) return;
+    actOnReport(role, selected, action).catch(() => {});
+  }
+
+  return (
+    <Panel title="Book performance report" subtitle={`Backend-connected · ${detail.period} · PBR-01..PBR-07`} className="mt-5">
+      <div className="mb-3 flex flex-wrap gap-2">
+        {list.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setSel(r.id)}
+            className={cn("rounded-lg border px-2.5 py-1 text-xs transition", selected === r.id ? "border-foreground bg-foreground text-background" : "border-border bg-background hover:border-foreground/40")}
+          >
+            {r.period}
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-border bg-secondary/40 p-3 text-[12px] text-ink-soft">{detail.rationale}</div>
+
+      {detail.dataCompleteness.gaps.length > 0 && (
+        <div className="mt-3 rounded-lg border-2 border-warn/40 bg-warn/5 p-3 text-[12px]">
+          <div className="flex items-center gap-2 font-medium text-warn"><AlertTriangle className="h-3.5 w-3.5" />Data gap — flagged, never smoothed over (PBR-05)</div>
+          <ul className="mt-2 space-y-1 text-ink-soft">
+            {detail.dataCompleteness.gaps.map((g, i) => (
+              <li key={i}>
+                <b>{g.dateRange}:</b> {g.reason}
+                {g.crossReferencedFindingId && (
+                  <div className="text-[11px] text-muted-foreground">Cross-referenced to {g.crossReferencedFindingId} — not a newly-discovered issue.</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {detail.funnel.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Funnel (PBR-01)</div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {detail.funnel.map((f, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="rounded-lg border border-border px-2.5 py-1">
+                  <span className="font-medium">{f.count}</span> <span className="text-[11px] text-muted-foreground">{f.stage}</span>
+                  {f.pctOfPriorStage != null && <span className="ml-1 font-mono text-[11px] text-muted-foreground">({f.pctOfPriorStage.toFixed(1)}%)</span>}
+                </div>
+                {i < detail.funnel.length - 1 && <ArrowUpRight className="h-3 w-3 text-muted-foreground" />}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {detail.lossRatio && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Loss ratio (PBR-02, PBR-03)</div>
+          <div className={cn("rounded-lg border p-3 text-sm", (detail.lossRatio.lowVolumeFlag || detail.lossRatio.singleEventDrivenFlag) ? "border-warn/40 bg-warn/5" : "border-border")}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">{detail.lossRatio.ratioPct.toFixed(1)}%</span>
+              <div className="flex gap-1.5">
+                {detail.lossRatio.lowVolumeFlag && <Chip tone="warn">low volume</Chip>}
+                {detail.lossRatio.singleEventDrivenFlag && <Chip tone="warn">single-event driven</Chip>}
+              </div>
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{detail.lossRatio.detail}</div>
+          </div>
+        </div>
+      )}
+
+      {detail.renewalRetention && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Renewal retention (PBR-04) — never collapsed into one bucket</div>
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+            <div className="rounded-lg border border-border p-2.5"><div className="text-[10px] text-muted-foreground">Retained</div><div className="font-mono">{detail.renewalRetention.retained} / {detail.renewalRetention.eligible}</div></div>
+            <div className="rounded-lg border border-border p-2.5"><div className="text-[10px] text-muted-foreground">Retention rate</div><div className="font-mono">{detail.renewalRetention.retentionRatePct.toFixed(1)}%</div></div>
+            <div className="rounded-lg border border-border p-2.5"><div className="text-[10px] text-muted-foreground">Underwriting non-renewal</div><div className="font-mono">{detail.renewalRetention.nonRenewedUnderwritingDecision}</div></div>
+            <div className="rounded-lg border border-warn/30 bg-warn/5 p-2.5"><div className="text-[10px] text-muted-foreground">Lapsed — no decision</div><div className="font-mono">{detail.renewalRetention.lapsedNoDecision}</div></div>
+          </div>
+          {detail.renewalRetention.lineItems.length > 0 && (
+            <ul className="mt-2 divide-y divide-border text-[12px]">
+              {detail.renewalRetention.lineItems.map((li, i) => (
+                <li key={i} className="flex items-center justify-between gap-2 py-1.5">
+                  <span>{li.policyNumber}</span>
+                  <Chip tone={li.category === "RETAINED" ? "success" : li.category === "LAPSED_NO_DECISION" ? "warn" : "neutral"}>{li.category.replace(/_/g, " ")}</Chip>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {detail.brokerProduction.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Broker production (PBR-06) — facts only, no speculation</div>
+          <ul className="divide-y divide-border">
+            {detail.brokerProduction.map((b, i) => (
+              <li key={i} className="py-2.5 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{b.brokerAgency}</span>
+                  <Chip tone={b.significantDecline ? "warn" : "neutral"}>{b.pctChange.toFixed(1)}%</Chip>
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">{b.detail}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {detail.appetiteExposureSection && (
+        <div className="mt-3 rounded-lg border border-accent/30 bg-accent/5 p-3 text-[12px]">
+          <div className="flex items-center gap-2 font-medium text-accent"><ShieldAlert className="h-3.5 w-3.5" />Portfolio risk concentration (PBR-07) — pulled from {detail.appetiteExposureSection.pulledFrom}, not recomputed</div>
+          <div className="mt-2 text-ink-soft">{detail.appetiteExposureSection.summary}</div>
+          {detail.appetiteExposureSection.lowVolumeFlag && <div className="mt-1"><Chip tone="neutral">low volume</Chip></div>}
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center gap-2 border-t border-border pt-3">
+        <Button variant="primary" onClick={() => act("approve")} disabled={role === "junior"}><CheckCircle2 className="h-4 w-4" />Mark reviewed</Button>
+        <Button variant="secondary" onClick={() => act("send")} disabled={role === "junior"}>Send to principal</Button>
+        <Button variant="secondary" onClick={() => act("escalate")}>Escalate</Button>
+      </div>
+    </Panel>
   );
 }
