@@ -1,18 +1,75 @@
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState, type ReactNode } from "react";
-import { Download, Gavel, ShieldAlert, CheckCircle2, Search, Filter, ArrowUpRight, TrendingUp, MapPin } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Download, Gavel, ShieldAlert, CheckCircle2, Search, Filter, ArrowUpRight, TrendingUp, MapPin, WifiOff, AlertTriangle, FileText } from "lucide-react";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
 import { useRole, SeniorOnlyNote, parseMoney } from "./role";
 import { useDecisions } from "./decisions";
 import { brokers, monthlyPipeline, stateMix, submissions, renewals, getRenewalDetail, type ActivityEntry } from "./mocks";
+import {
+  listAudits,
+  getAudit,
+  runScenario,
+  actOnAudit,
+  type GovernanceDetailDTO,
+  type GovernanceRowDTO,
+} from "@/lib/appetite-governance-api";
 
 /* ============================================================
-   Governance & Portfolio reporting — clickable, no backend.
-   Seeded from the mock decision log + computed rollups over the
-   existing mock arrays. Backend later = query the audit log.
+   Governance & Portfolio reporting — clickable, with an
+   illustrative local decision-log demo (unchanged) plus a real-
+   backend "Governance findings" panel, additive below it. That
+   panel tries the actual Backend-AI-OS /api/mga/appetite-
+   governance endpoint (AG-02..AG-07: decision trail aggregation
+   + completeness, rule version drift, override pattern
+   detection, audit report generation, portfolio concentration,
+   human-reviewed suggestion queue). Falls back to a "backend
+   unavailable" note if unreachable, so this screen still works
+   standalone either way.
    ============================================================ */
+
+const GOVERNANCE_SCENARIOS = ["scenario_01", "scenario_02", "scenario_03", "scenario_04", "scenario_05", "scenario_06"];
+
+function useBackendGovernance(role: "junior" | "senior") {
+  const [rows, setRows] = useState<GovernanceRowDTO[] | null>(null);
+  const [details, setDetails] = useState<Record<string, GovernanceDetailDTO>>({});
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listAudits(role)
+      .then(async (existing) => {
+        if (cancelled) return;
+        setConnected(true);
+        let list = existing;
+        if (list.length === 0) {
+          await Promise.all(GOVERNANCE_SCENARIOS.map((s) => runScenario(role, s).catch(() => null)));
+          if (cancelled) return;
+          list = await listAudits(role).catch(() => []);
+        }
+        if (cancelled || list.length === 0) return;
+        const byId: Record<string, GovernanceDetailDTO> = {};
+        await Promise.all(
+          list.map(async (row) => {
+            const d = await getAudit(role, row.id).catch(() => null);
+            if (d) byId[row.id] = d;
+          }),
+        );
+        if (cancelled) return;
+        setDetails(byId);
+        setRows(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  return { rows, details, connected };
+}
 
 function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" | "success" | "warn" | "danger" }) {
   const map: Record<string, string> = {
@@ -72,6 +129,7 @@ export function AppetiteGovernance() {
   const { role } = useRole();
   const isJunior = role === "junior";
   const { entries, record } = useDecisions();
+  const { rows: backendRows, details: backendDetails, connected: backendConnected } = useBackendGovernance(role);
   const [f, setF] = useState<"All" | "AI" | "Human">("All");
   const [q, setQ] = useState("");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -176,6 +234,14 @@ export function AppetiteGovernance() {
         </div>
       </div>
 
+      {/* Real backend governance findings (backend-connected, AG-02..AG-07) */}
+      <GovernanceFindingsPanel
+        role={role}
+        rows={backendRows}
+        details={backendDetails}
+        connected={backendConnected}
+      />
+
       {activity.length > 0 && (
         <Panel title="Activity" className="mt-5">
           <ul className="divide-y divide-border">
@@ -186,6 +252,153 @@ export function AppetiteGovernance() {
         </Panel>
       )}
     </div>
+  );
+}
+
+/** Real backend governance analysis (Workflow-07 dataset scenarios) — additive, shown
+ * below the illustrative decision-log demo above rather than replacing it. */
+function GovernanceFindingsPanel({
+  role,
+  rows,
+  details,
+  connected,
+}: {
+  role: "junior" | "senior";
+  rows: GovernanceRowDTO[] | null;
+  details: Record<string, GovernanceDetailDTO>;
+  connected: boolean;
+}) {
+  const [sel, setSel] = useState<string | null>(null);
+  const list = rows ?? [];
+  const selected = sel ?? list[0]?.id ?? null;
+  const detail = selected ? details[selected] : undefined;
+
+  if (!connected) {
+    return (
+      <Panel title="Governance findings" subtitle="Backend-connected · AG-02..AG-07" className="mt-5">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
+          <WifiOff className="h-3.5 w-3.5" />
+          Backend unavailable — the illustrative decision log above still works. Real aggregated audit findings appear here automatically once the Appetite Governance service is reachable.
+        </div>
+      </Panel>
+    );
+  }
+
+  if (list.length === 0 || !detail) {
+    return (
+      <Panel title="Governance findings" subtitle="Backend-connected · AG-02..AG-07" className="mt-5">
+        <div className="text-sm text-muted-foreground">No governance analyses evaluated yet.</div>
+      </Panel>
+    );
+  }
+
+  function act(action: "approve" | "escalate" | "send") {
+    if (!selected) return;
+    actOnAudit(role, selected, action).catch(() => {});
+  }
+
+  return (
+    <Panel title="Governance findings" subtitle={`Backend-connected · ${detail.period} · AG-02..AG-07`} className="mt-5">
+      <div className="mb-3 flex flex-wrap gap-2">
+        {list.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setSel(r.id)}
+            className={cn("rounded-lg border px-2.5 py-1 text-xs transition", selected === r.id ? "border-foreground bg-foreground text-background" : "border-border bg-background hover:border-foreground/40")}
+          >
+            {r.period}
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-border bg-secondary/40 p-3 text-[12px] text-ink-soft">{detail.rationale}</div>
+
+      {detail.decisionTrail.gaps.length > 0 && (
+        <div className="mt-3 rounded-lg border-2 border-warn/40 bg-warn/5 p-3 text-[12px]">
+          <div className="flex items-center gap-2 font-medium text-warn"><AlertTriangle className="h-3.5 w-3.5" />Data gap — flagged, never smoothed over</div>
+          <ul className="mt-2 space-y-1 text-ink-soft">
+            {detail.decisionTrail.gaps.map((g, i) => (
+              <li key={i}><b>{g.dateRange}:</b> {g.reason}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {detail.ruleVersionDriftFindings.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Rule version drift (AG-03)</div>
+          <ul className="space-y-2 text-sm">
+            {detail.ruleVersionDriftFindings.map((f, i) => (
+              <li key={i} className={cn("rounded-lg border p-3", f.stillQualifies ? "border-border" : "border-warn/40 bg-warn/5")}>
+                <div className="flex items-center gap-1.5 font-medium"><ShieldAlert className="h-3.5 w-3.5 text-warn" />{f.insured} · {f.policyNumber}</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">{f.detail}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {detail.overridePatternFindings.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Override pattern detection (AG-04)</div>
+          <ul className="divide-y divide-border">
+            {detail.overridePatternFindings.map((f, i) => (
+              <li key={i} className="py-2.5 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{f.underwriter}</span>
+                  <Chip tone={f.flagged ? "warn" : "success"}>{f.flagged ? "Suggestion generated" : "Suppressed"}</Chip>
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">{f.overrideCount} override(s) · {f.undocumentedCount} undocumented</div>
+                {f.suggestion && <div className="mt-1 text-[12px] text-ink-soft">{f.suggestion}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {detail.portfolioConcentrationFindings.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Portfolio concentration (AG-06)</div>
+          <ul className="space-y-2 text-sm">
+            {detail.portfolioConcentrationFindings.map((f, i) => (
+              <li key={i} className="rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{f.classCode} · {f.carrier}</span>
+                  {f.lowVolumeFlag && <Chip tone="neutral">low volume</Chip>}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">{f.detail}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {detail.auditReport && (
+        <div className="mt-3 rounded-lg border border-accent/30 bg-accent/5 p-3 text-[12px]">
+          <div className="flex items-center gap-2 font-medium text-accent"><FileText className="h-3.5 w-3.5" />{detail.auditReport.carrierName} — Delegated Authority Audit ({detail.auditReport.period})</div>
+          <ul className="mt-2 grid grid-cols-2 gap-1.5 text-ink-soft">
+            <li>Triage: {detail.auditReport.triageDecisions}</li>
+            <li>Renewal: {detail.auditReport.renewalDecisions}</li>
+            <li>Bind: {detail.auditReport.bindDecisions}</li>
+            <li>Endorsement: {detail.auditReport.endorsementDecisions}</li>
+            <li>Ceiling breaches referred: {detail.auditReport.authorityCeilingBreachesReferred}</li>
+            <li>Approved / declined: {detail.auditReport.authorityCeilingBreachesApproved} / {detail.auditReport.authorityCeilingBreachesDeclined}</li>
+          </ul>
+          <div className="mt-2 text-[11px] text-muted-foreground">{detail.auditReport.groundingStatement}</div>
+        </div>
+      )}
+
+      {detail.governanceSuggestionQueue.length > 0 && (
+        <div className="mt-4 border-t border-border pt-3">
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Governance suggestion queue (AG-07) — human review required</div>
+          <div className="flex items-center gap-2">
+            <Button variant="primary" onClick={() => act("approve")} disabled={role === "junior"}><CheckCircle2 className="h-4 w-4" />Mark reviewed</Button>
+            {detail.auditReport && <Button variant="secondary" onClick={() => act("send")} disabled={role === "junior"}>Submit to carrier</Button>}
+            <Button variant="secondary" onClick={() => act("escalate")}>Escalate to principal</Button>
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }
 
