@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Download,
   Sparkles,
@@ -12,20 +12,78 @@ import {
   ArrowUpRight,
   TrendingDown,
   TrendingUp,
+  WifiOff,
+  FileText,
 } from "lucide-react";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
 import { useRole, JUNIOR_PREMIUM_CAP } from "./role";
 import { submissions, ratePlan, rate, getQuoteBase, nowClock, type Submission, type QuoteResult, type ActivityEntry } from "./mocks";
+import {
+  listWorksheets,
+  getWorksheet,
+  runScenario,
+  actOnWorksheet,
+  type WorksheetDetailDTO,
+  type WorksheetRowDTO,
+} from "@/lib/quoting-rating-api";
 
 /* ============================================================
    Quoting & Rating Support — PRD-aligned clickable prototype.
-   No backend: the rating engine is the pure `rate()` function
-   over the rate-plan data in mocks.ts. Inputs recompute the
-   premium, band, ratios, and a cited factor breakdown live.
-   Human approves the quote; nothing binds here.
+   The configuration/slider demo below is illustrative and stays
+   local-state only (the pure `rate()` function over mocks.ts) —
+   untouched. Below it, a real-backend "Rating Worksheet" panel
+   tries the actual Backend-AI-OS /api/mga/quoting-rating endpoint
+   (QR-01..QR-08: filed rate resolution, staleness detection,
+   schedule credit/debit suggestion + hard bounds capping, minimum
+   premium floor, multi-state per-state rating, benchmark sanity
+   check). Falls back to a "backend unavailable" note if
+   unreachable, so this screen still works standalone either way.
+   Human approves every quote; nothing binds here.
    ============================================================ */
+
+const QUOTING_SCENARIOS = ["scenario_01", "scenario_02", "scenario_03", "scenario_04", "scenario_05", "scenario_06"];
+
+function useBackendWorksheets(role: "junior" | "senior") {
+  const [rows, setRows] = useState<WorksheetRowDTO[] | null>(null);
+  const [details, setDetails] = useState<Record<string, WorksheetDetailDTO>>({});
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listWorksheets(role)
+      .then(async (existing) => {
+        if (cancelled) return;
+        setConnected(true);
+        let list = existing;
+        if (list.length === 0) {
+          await Promise.all(QUOTING_SCENARIOS.map((s) => runScenario(role, s).catch(() => null)));
+          if (cancelled) return;
+          list = await listWorksheets(role).catch(() => []);
+        }
+        if (cancelled || list.length === 0) return;
+        const byId: Record<string, WorksheetDetailDTO> = {};
+        await Promise.all(
+          list.map(async (row) => {
+            const d = await getWorksheet(role, row.id).catch(() => null);
+            if (d) byId[row.id] = d;
+          }),
+        );
+        if (cancelled) return;
+        setDetails(byId);
+        setRows(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  return { rows, details, connected };
+}
 
 function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" | "success" | "warn" | "danger" }) {
   const map: Record<string, string> = {
@@ -90,6 +148,7 @@ export function QuotingRating() {
 
   const { role } = useRole();
   const isJunior = role === "junior";
+  const { rows: worksheetRows, details: worksheetDetails, connected: worksheetsConnected } = useBackendWorksheets(role);
 
   const q = useMemo(() => rate(base, { deductibleK: ded, limitM: limit, endorsements: ends }), [base, ded, limit, ends]);
   const overCap = q.premium > JUNIOR_PREMIUM_CAP;
@@ -319,6 +378,14 @@ export function QuotingRating() {
             </div>
           </Panel>
 
+          {/* Real rating worksheet (backend-connected, QR-01..QR-08) */}
+          <RatingWorksheetPanel
+            role={role}
+            rows={worksheetRows}
+            details={worksheetDetails}
+            connected={worksheetsConnected}
+          />
+
           {/* Activity */}
           <Panel title="Activity" subtitle="Rating · quote · approval — audited">
             <ul className="divide-y divide-border">
@@ -333,6 +400,139 @@ export function QuotingRating() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Real backend rating worksheets (Workflow-05 dataset scenarios) — additive, shown
+ * alongside the illustrative slider demo above rather than replacing it. */
+function RatingWorksheetPanel({
+  role,
+  rows,
+  details,
+  connected,
+}: {
+  role: "junior" | "senior";
+  rows: WorksheetRowDTO[] | null;
+  details: Record<string, WorksheetDetailDTO>;
+  connected: boolean;
+}) {
+  const [sel, setSel] = useState<string | null>(null);
+  const list = rows ?? [];
+  const selected = sel ?? list[0]?.id ?? null;
+  const detail = selected ? details[selected] : undefined;
+
+  if (!connected) {
+    return (
+      <Panel title="Rating worksheet" subtitle="Backend-connected · QR-01..QR-08">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
+          <WifiOff className="h-3.5 w-3.5" />
+          Backend unavailable — the illustrative rating above still works. Real filed-rate worksheets appear here automatically once the Quoting & Rating Support service is reachable.
+        </div>
+      </Panel>
+    );
+  }
+
+  if (list.length === 0 || !detail) {
+    return (
+      <Panel title="Rating worksheet" subtitle="Backend-connected · QR-01..QR-08">
+        <div className="text-sm text-muted-foreground">No worksheets calculated yet.</div>
+      </Panel>
+    );
+  }
+
+  function act(action: "approve" | "escalate") {
+    if (!selected) return;
+    actOnWorksheet(role, selected, action).catch(() => {});
+  }
+
+  return (
+    <Panel title="Rating worksheet" subtitle={`Backend-connected · ${detail.classCode} · QR-01..QR-08`}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {list.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setSel(r.id)}
+            className={cn("rounded-lg border px-2.5 py-1 text-xs transition", selected === r.id ? "border-foreground bg-foreground text-background" : "border-border bg-background hover:border-foreground/40")}
+          >
+            {r.namedInsured.split(" ").slice(0, 2).join(" ")}
+          </button>
+        ))}
+      </div>
+
+      {detail.status === "BLOCKED_STALE_RATE_PLAN" ? (
+        <div className="flex items-center gap-3 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-4 text-sm">
+          <ShieldAlert className="h-5 w-5 shrink-0 text-destructive" />
+          <div>
+            <b className="text-destructive">Blocked — stale rate plan (QR-08).</b>{" "}
+            <span className="text-ink-soft">{detail.stateCalculations[0]?.blockedReason}</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="mb-3 flex items-end justify-between gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Total indicated premium</div>
+              <div className="mt-1 font-serif text-3xl leading-none">
+                {detail.totalIndicatedPremium != null ? money(detail.totalIndicatedPremium) : "—"}
+              </div>
+            </div>
+            {detail.benchmarkComparison.flaggedForReview && (
+              <Chip tone="warn"><AlertTriangle className="h-3 w-3" /> Benchmark swing flagged (QR-07)</Chip>
+            )}
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="grid grid-cols-6 bg-secondary/60 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {["State", "Base premium", "Suggested", "Requested", "Applied", "Final"].map((h) => (
+                <div key={h} className="px-3 py-2">{h}</div>
+              ))}
+            </div>
+            {detail.stateCalculations.map((sc) => (
+              <div key={sc.state} className="grid grid-cols-6 border-t border-border text-sm">
+                <div className="px-3 py-2 font-mono text-xs">{sc.state}</div>
+                <div className="px-3 py-2">{sc.basePremium != null ? money(sc.basePremium) : "—"}</div>
+                <div className="px-3 py-2 text-muted-foreground">
+                  {sc.suggestedAdjustmentPct != null ? `${sc.suggestedAdjustmentPct > 0 ? "+" : ""}${sc.suggestedAdjustmentPct}%` : "—"}
+                </div>
+                <div className="px-3 py-2 text-muted-foreground">
+                  {sc.requestedAdjustmentPct != null ? `${sc.requestedAdjustmentPct > 0 ? "+" : ""}${sc.requestedAdjustmentPct}%` : "—"}
+                </div>
+                <div className="px-3 py-2">
+                  <span className={cn(sc.adjustmentCapped ? "text-destructive" : "")}>
+                    {sc.appliedAdjustmentPct > 0 ? "+" : ""}{sc.appliedAdjustmentPct}%
+                  </span>
+                  {sc.adjustmentCapped && <span className="ml-1 text-[10px] uppercase text-destructive">capped</span>}
+                </div>
+                <div className="px-3 py-2 font-medium">
+                  {sc.finalStatePremium != null ? money(sc.finalStatePremium) : "—"}
+                  {sc.minimumPremiumApplied && <span className="ml-1 text-[10px] uppercase text-accent">min applied</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {detail.stateCalculations.some((sc) => sc.adjustmentGrounding) && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-secondary/40 p-3 text-[12px] text-ink-soft">
+              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+              <span>
+                {detail.stateCalculations.find((sc) => sc.adjustmentGrounding)?.adjustmentGrounding}
+                {" — grounded suggestion, requires underwriter confirmation."}
+              </span>
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-[11px] text-muted-foreground">Full worksheet transparency (QR-05) — every input traceable to source.</span>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+            <Button variant="primary" onClick={() => act("approve")}><CheckCircle2 className="h-4 w-4" />Finalize quote</Button>
+            <Button variant="secondary" onClick={() => act("escalate")}>Send to senior</Button>
+          </div>
+        </>
+      )}
+    </Panel>
   );
 }
 
