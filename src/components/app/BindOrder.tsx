@@ -1,19 +1,75 @@
 import { Link } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
-import { CheckCircle2, Circle, ShieldCheck, ShieldAlert, FileCheck2, FileText, Send, Gavel, Clock, ArrowUpRight } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { CheckCircle2, Circle, ShieldCheck, ShieldAlert, FileCheck2, FileText, Send, Gavel, Clock, ArrowUpRight, WifiOff, AlertTriangle } from "lucide-react";
 import { PageHeader } from "./AppShell";
 import { Panel } from "./Workflows";
 import { cn } from "@/lib/utils";
 import { useRole } from "./role";
 import { useDecisions } from "./decisions";
 import { bindOrders, nowClock, type BindCheck, type ActivityEntry } from "./mocks";
+import {
+  listBinds,
+  getBind,
+  runScenario,
+  actOnBind,
+  type BindDetailDTO,
+  type BindRowDTO,
+} from "@/lib/bind-issuance-api";
 
 /* ============================================================
-   Bind Order & Issuance (roadmap #7) — clickable queue, no
-   backend. Approved risks → clear subjectivities/compliance →
-   draft binder → issue (simulated PAS write-back) → hand off.
-   Records issuance to the shared decisions store.
+   Bind Order & Issuance (roadmap #7) — clickable queue with an
+   illustrative local-state demo (unchanged) plus a real-backend
+   "Bind & Issuance Review" panel, additive below it. That panel
+   tries the actual Backend-AI-OS /api/mga/bind-issuance endpoint
+   (MBI-01..MBI-07: worksheet fidelity, pre-bind subjectivity
+   gating, final authority reconfirmation against CURRENT
+   information, PAS write-back, issuance reconciliation,
+   downstream trigger gating, post-bind obligation tracking).
+   Falls back to a "backend unavailable" note if unreachable, so
+   this screen still works standalone either way.
    ============================================================ */
+
+const BIND_SCENARIOS = ["scenario_01", "scenario_02", "scenario_03", "scenario_04", "scenario_05", "scenario_06"];
+
+function useBackendBinds(role: "junior" | "senior") {
+  const [rows, setRows] = useState<BindRowDTO[] | null>(null);
+  const [details, setDetails] = useState<Record<string, BindDetailDTO>>({});
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listBinds(role)
+      .then(async (existing) => {
+        if (cancelled) return;
+        setConnected(true);
+        let list = existing;
+        if (list.length === 0) {
+          await Promise.all(BIND_SCENARIOS.map((s) => runScenario(role, s).catch(() => null)));
+          if (cancelled) return;
+          list = await listBinds(role).catch(() => []);
+        }
+        if (cancelled || list.length === 0) return;
+        const byId: Record<string, BindDetailDTO> = {};
+        await Promise.all(
+          list.map(async (row) => {
+            const d = await getBind(role, row.id).catch(() => null);
+            if (d) byId[row.id] = d;
+          }),
+        );
+        if (cancelled) return;
+        setDetails(byId);
+        setRows(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  return { rows, details, connected };
+}
 
 function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" | "success" | "warn" | "danger" }) {
   const map: Record<string, string> = {
@@ -40,6 +96,7 @@ export function BindOrder() {
   const { role } = useRole();
   const isJunior = role === "junior";
   const { record } = useDecisions();
+  const { rows: backendRows, details: backendDetails, connected: backendConnected } = useBackendBinds(role);
   const [selected, setSelected] = useState(bindOrders[0].id);
   const [state, setState] = useState<Record<string, OrderState>>(() =>
     Object.fromEntries(bindOrders.map((o) => [o.id, { checks: structuredClone(o.checks), decision: null, activity: [...o.activity] }])),
@@ -192,6 +249,14 @@ export function BindOrder() {
             </div>
           </Panel>
 
+          {/* Real bind & issuance review (backend-connected, MBI-01..MBI-07) */}
+          <BindReviewPanel
+            role={role}
+            rows={backendRows}
+            details={backendDetails}
+            connected={backendConnected}
+          />
+
           {/* Activity */}
           <Panel title="Activity">
             <ul className="divide-y divide-border">
@@ -203,5 +268,145 @@ export function BindOrder() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Real backend bind orders (Workflow-06 dataset scenarios) — additive, shown alongside
+ * the illustrative slider/checklist demo above rather than replacing it. */
+function BindReviewPanel({
+  role,
+  rows,
+  details,
+  connected,
+}: {
+  role: "junior" | "senior";
+  rows: BindRowDTO[] | null;
+  details: Record<string, BindDetailDTO>;
+  connected: boolean;
+}) {
+  const [sel, setSel] = useState<string | null>(null);
+  const list = rows ?? [];
+  const selected = sel ?? list[0]?.id ?? null;
+  const detail = selected ? details[selected] : undefined;
+
+  if (!connected) {
+    return (
+      <Panel title="Bind & issuance review" subtitle="Backend-connected · MBI-01..MBI-07">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
+          <WifiOff className="h-3.5 w-3.5" />
+          Backend unavailable — the illustrative bind queue above still works. Real worksheet-locked bind orders appear here automatically once the Bind Order & Issuance service is reachable.
+        </div>
+      </Panel>
+    );
+  }
+
+  if (list.length === 0 || !detail) {
+    return (
+      <Panel title="Bind & issuance review" subtitle="Backend-connected · MBI-01..MBI-07">
+        <div className="text-sm text-muted-foreground">No bind orders evaluated yet.</div>
+      </Panel>
+    );
+  }
+
+  function act(action: "approve" | "escalate") {
+    if (!selected) return;
+    actOnBind(role, selected, action).catch(() => {});
+  }
+
+  const blocked = detail.bindOrderStatus === "BLOCKED";
+  const discrepancy = detail.issuanceReconciliation.status === "DISCREPANCY_FLAGGED";
+
+  return (
+    <Panel title="Bind & issuance review" subtitle={`Backend-connected · ${detail.namedInsured} · MBI-01..MBI-07`}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {list.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setSel(r.id)}
+            className={cn("rounded-lg border px-2.5 py-1 text-xs transition", selected === r.id ? "border-foreground bg-foreground text-background" : "border-border bg-background hover:border-foreground/40")}
+          >
+            {r.namedInsured.split(" ").slice(0, 2).join(" ")}
+          </button>
+        ))}
+      </div>
+
+      <div className={cn("flex items-start gap-3 rounded-xl border-2 p-4", blocked || discrepancy ? "border-warn/40 bg-warn/5" : "border-success/40 bg-success/5")}>
+        {blocked || discrepancy ? <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warn" /> : <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-success" />}
+        <div>
+          <div className={cn("font-serif text-lg", blocked || discrepancy ? "text-warn" : "text-success")}>
+            {detail.bindOrderStatus === "READY" ? "Ready to bind" : detail.bindOrderStatus}
+          </div>
+          <p className="mt-1 text-[12px] text-ink-soft">{detail.rationale}</p>
+        </div>
+      </div>
+
+      {detail.worksheetReference && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1"><Gavel className="h-3 w-3 text-accent" />{detail.worksheetReference.worksheetId} · ${detail.worksheetReference.premium.toLocaleString()}</span>
+          {detail.stalenessCheck && (
+            <>
+              <span>·</span>
+              <span className={cn("inline-flex items-center gap-1", detail.stalenessCheck.exceedsThreshold ? "text-warn" : "")}>
+                <Clock className="h-3 w-3" />
+                {detail.stalenessCheck.daysSinceWorksheet != null ? `${detail.stalenessCheck.daysSinceWorksheet}d since worksheet` : "no staleness data"}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {detail.authorityReconfirmation && detail.authorityReconfirmation.outcome !== "WITHIN_AUTHORITY" && (
+        <div className="mt-3 rounded-lg border border-warn/40 bg-warn/5 p-3 text-[12px]">
+          <div className="flex items-center gap-2 font-medium text-warn"><AlertTriangle className="h-3.5 w-3.5" />{detail.authorityReconfirmation.outcome.replace(/_/g, " ")}</div>
+          {detail.authorityReconfirmation.referralDraftText && (
+            <pre className="mt-2 whitespace-pre-wrap font-sans text-[11px] text-ink-soft">{detail.authorityReconfirmation.referralDraftText}</pre>
+          )}
+        </div>
+      )}
+
+      {detail.preBindSubjectivities.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Pre-bind subjectivities</div>
+          <ul className="space-y-1.5 text-sm">
+            {detail.preBindSubjectivities.map((s, i) => (
+              <li key={i} className="flex items-center justify-between gap-2 rounded-lg border border-border p-2">
+                <span className="flex items-center gap-2">{s.status === "cleared" ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Circle className="h-4 w-4 text-warn" />}{s.description}</span>
+                <Chip tone={s.materiality === "material" ? "warn" : "neutral"}>{s.materiality}</Chip>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {detail.issuanceReconciliation.discrepancyDetail.length > 0 && (
+        <div className="mt-3 rounded-lg border-2 border-destructive/40 bg-destructive/5 p-3 text-[12px]">
+          <div className="flex items-center gap-2 font-medium text-destructive"><ShieldAlert className="h-3.5 w-3.5" />Issuance discrepancy — never trust by default (MBI-05)</div>
+          <ul className="mt-2 space-y-1">
+            {detail.issuanceReconciliation.discrepancyDetail.map((d, i) => (
+              <li key={i} className="text-ink-soft"><b>{d.field}:</b> bound {d.bound} vs. issued {d.issued}</li>
+            ))}
+          </ul>
+          <div className="mt-2 text-[11px] text-muted-foreground">
+            Downstream: bind confirmation {detail.downstreamTriggersFired.bindConfirmation ? "fired" : "HELD"} · policy delivery {detail.downstreamTriggersFired.policyDelivered ? "fired" : "HELD"}
+          </div>
+        </div>
+      )}
+
+      {detail.postBindObligations.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Post-bind ongoing obligations (MBI-07 — never blocks binding)</div>
+          <ul className="space-y-1 text-sm">
+            {detail.postBindObligations.map((o, i) => (
+              <li key={i} className="flex items-center gap-2"><FileText className="h-3.5 w-3.5 text-accent" />{o.description}<Chip tone="neutral">reminders at {o.reminderDaysBefore.join("/")}d</Chip></li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+        <Button variant="primary" onClick={() => act("approve")} disabled={blocked}><FileCheck2 className="h-4 w-4" />Approve · write to PAS</Button>
+        <Button variant="secondary" onClick={() => act("escalate")}>Send to senior</Button>
+      </div>
+    </Panel>
   );
 }
